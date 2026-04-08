@@ -20,34 +20,61 @@ const io = new Server(server, {
 });
 
 const players = {};
-let countdownInterval = null; // Tracks the pre-game countdown
+let countdownInterval = null;
+let gameInProgress = false; // NEW: Prevent new players from joining mid-game
 
-// --- NEW: Helper function to check if game can start ---
 function checkGameStart() {
     const playerArray = Object.values(players);
     const allReady = playerArray.length >= 2 && playerArray.every(p => p.isReady);
 
-    if (allReady) {
+    if (allReady && !gameInProgress) {
         let timeLeft = 5;
-        io.emit('countdown_update', `Game starting in ${timeLeft}...`);
+        io.emit('countdown_update', `BREACH IMMINENT IN ${timeLeft}...`);
         
         countdownInterval = setInterval(() => {
             timeLeft--;
             if (timeLeft > 0) {
-                io.emit('countdown_update', `Game starting in ${timeLeft}...`);
+                io.emit('countdown_update', `BREACH IMMINENT IN ${timeLeft}...`);
             } else {
                 clearInterval(countdownInterval);
-                io.emit('game_start'); // This will trigger the map load later
+                startGame(); // NEW: Call the start game logic
             }
         }, 1000);
     } else {
-        // If the countdown was running but someone un-readied or left
         if (countdownInterval) {
             clearInterval(countdownInterval);
             countdownInterval = null;
-            io.emit('countdown_update', 'Waiting for all players to be ready...');
+            io.emit('countdown_update', 'WAITING FOR FULL READY STATUS...');
         }
     }
+}
+
+// --- NEW: Role Assignment Logic ---
+function startGame() {
+    gameInProgress = true;
+    const playerIds = Object.keys(players);
+    
+    // Pick 1 random Killer
+    const killerIndex = Math.floor(Math.random() * playerIds.length);
+    const killerId = playerIds[killerIndex];
+
+    // Assign roles and send private messages
+    playerIds.forEach(id => {
+        if (id === killerId) {
+            players[id].role = 'Killer';
+        } else {
+            players[id].role = 'Crewmate';
+            // Future: Assign 3-7 tasks here based on player count
+        }
+
+        // Send a PRIVATE message to this specific socket ID
+        io.to(id).emit('game_start', {
+            role: players[id].role,
+            playersInGame: playerIds.length
+        });
+    });
+
+    console.log(`Game started! ${players[killerId].name} is the Killer.`);
 }
 // --------------------------------------------------------
 
@@ -55,6 +82,10 @@ io.on('connection', (socket) => {
     console.log(`A player connected: ${socket.id}`);
 
     socket.on('join_lobby', (playerName) => {
+        if (gameInProgress) {
+            socket.emit('countdown_update', 'GAME IN PROGRESS. PLEASE WAIT.');
+            return;
+        }
         players[socket.id] = {
             id: socket.id,
             name: playerName || `Player_${Math.floor(Math.random() * 1000)}`,
