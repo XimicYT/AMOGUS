@@ -6,17 +6,12 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", message: "Sabotage server is alive!" });
-});
+app.get("/health", (req, res) => { res.status(200).json({ status: "ok", message: "Sabotage server is alive!" }); });
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  path: "/api/game-data",
-  cors: { origin: "*", methods: ["GET", "POST"] },
-  // THE HEARTBEAT CONFIGURATION (Handles rapid disconnects safely)
-  pingInterval: 10000, 
-  pingTimeout: 5000, 
+  path: "/api/game-data", cors: { origin: "*", methods: ["GET", "POST"] },
+  pingInterval: 10000, pingTimeout: 5000, 
 });
 
 const players = {};
@@ -27,37 +22,28 @@ let gameLoopInterval = null;
 const MAP_SIZE = 2000;
 const TICK_RATE = 1000 / 20;
 
-// --- THE CARD DATABASE ---
+// NEW: Pod Lockdown Added!
 const CARD_DB = {
   short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision to 2 meters." },
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
   gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
-  grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." }
+  grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
+  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds."}
 };
 
 let activeGlobalEffects = {}; 
 
 const MAP_WALLS = [
-  { x: 0, y: 0, w: 2000, h: 40 }, { x: 0, y: 1960, w: 2000, h: 40 },
-  { x: 0, y: 0, w: 40, h: 2000 }, { x: 1960, y: 0, w: 40, h: 2000 },
-  { x: 800, y: 800, w: 150, h: 40 }, { x: 1050, y: 800, w: 150, h: 40 },
-  { x: 800, y: 1160, w: 150, h: 40 }, { x: 1050, y: 1160, w: 150, h: 40 },
-  { x: 800, y: 800, w: 40, h: 150 }, { x: 800, y: 1050, w: 40, h: 150 },
-  { x: 1160, y: 800, w: 40, h: 150 }, { x: 1160, y: 1050, w: 40, h: 150 },
-  { x: 200, y: 200, w: 400, h: 40 }, { x: 200, y: 600, w: 150, h: 40 },  
-  { x: 450, y: 600, w: 150, h: 40 }, { x: 200, y: 200, w: 40, h: 400 },  
-  { x: 560, y: 200, w: 40, h: 150 }, { x: 560, y: 450, w: 40, h: 150 },  
-  { x: 1400, y: 200, w: 400, h: 40 }, { x: 1400, y: 600, w: 150, h: 40 }, 
-  { x: 1650, y: 600, w: 150, h: 40 }, { x: 1760, y: 200, w: 40, h: 400 }, 
-  { x: 1400, y: 200, w: 40, h: 150 }, { x: 1400, y: 450, w: 40, h: 150 }, 
-  { x: 200, y: 1760, w: 400, h: 40 }, { x: 200, y: 1400, w: 150, h: 40 }, 
-  { x: 450, y: 1400, w: 150, h: 40 }, { x: 200, y: 1400, w: 40, h: 400 }, 
-  { x: 560, y: 1400, w: 40, h: 150 }, { x: 560, y: 1650, w: 40, h: 150 }, 
-  { x: 1400, y: 1760, w: 400, h: 40 }, { x: 1400, y: 1400, w: 150, h: 40 },
-  { x: 1650, y: 1400, w: 150, h: 40 }, { x: 1760, y: 1400, w: 40, h: 400 },
-  { x: 1400, y: 1400, w: 40, h: 150 }, { x: 1400, y: 1650, w: 40, h: 150 },
-  { x: 600, y: 600, w: 100, h: 100 }, { x: 1300, y: 600, w: 100, h: 100 },
-  { x: 600, y: 1300, w: 100, h: 100 }, { x: 1300, y: 1300, w: 100, h: 100 }
+  { x: 0, y: 0, w: 2000, h: 40 }, { x: 0, y: 1960, w: 2000, h: 40 }, { x: 0, y: 0, w: 40, h: 2000 }, { x: 1960, y: 0, w: 40, h: 2000 },
+  { x: 800, y: 800, w: 150, h: 40 }, { x: 1050, y: 800, w: 150, h: 40 }, { x: 800, y: 1160, w: 150, h: 40 }, { x: 1050, y: 1160, w: 150, h: 40 },
+  { x: 800, y: 800, w: 40, h: 150 }, { x: 800, y: 1050, w: 40, h: 150 }, { x: 1160, y: 800, w: 40, h: 150 }, { x: 1160, y: 1050, w: 40, h: 150 },
+  { x: 200, y: 200, w: 400, h: 40 }, { x: 200, y: 600, w: 150, h: 40 }, { x: 450, y: 600, w: 150, h: 40 }, { x: 200, y: 200, w: 40, h: 400 },  
+  { x: 560, y: 200, w: 40, h: 150 }, { x: 560, y: 450, w: 40, h: 150 }, { x: 1400, y: 200, w: 400, h: 40 }, { x: 1400, y: 600, w: 150, h: 40 }, 
+  { x: 1650, y: 600, w: 150, h: 40 }, { x: 1760, y: 200, w: 40, h: 400 }, { x: 1400, y: 200, w: 40, h: 150 }, { x: 1400, y: 450, w: 40, h: 150 }, 
+  { x: 200, y: 1760, w: 400, h: 40 }, { x: 200, y: 1400, w: 150, h: 40 }, { x: 450, y: 1400, w: 150, h: 40 }, { x: 200, y: 1400, w: 40, h: 400 }, 
+  { x: 560, y: 1400, w: 40, h: 150 }, { x: 560, y: 1650, w: 40, h: 150 }, { x: 1400, y: 1760, w: 400, h: 40 }, { x: 1400, y: 1400, w: 150, h: 40 },
+  { x: 1650, y: 1400, w: 150, h: 40 }, { x: 1760, y: 1400, w: 40, h: 400 }, { x: 1400, y: 1400, w: 40, h: 150 }, { x: 1400, y: 1650, w: 40, h: 150 },
+  { x: 600, y: 600, w: 100, h: 100 }, { x: 1300, y: 600, w: 100, h: 100 }, { x: 600, y: 1300, w: 100, h: 100 }, { x: 1300, y: 1300, w: 100, h: 100 }
 ];
 
 const GAME_TASKS = [
@@ -73,6 +59,7 @@ const GAME_TASKS = [
 
 let totalTaskTarget = 0; 
 let tasksCompleted = 0;
+let escapePhaseActive = false; // NEW
 
 function checkWallCollision(x, y) {
   const radius = 15; 
@@ -95,13 +82,12 @@ function drawCard(player) {
   player.inventory.push(drawn.id);
 }
 
-// Ensure the server can properly recycle the game state
 function resetGame() {
-  gameInProgress = false;
+  gameInProgress = false; escapePhaseActive = false;
   if (gameLoopInterval) { clearInterval(gameLoopInterval); gameLoopInterval = null; }
   activeGlobalEffects = {}; totalTaskTarget = 0; tasksCompleted = 0;
   Object.values(players).forEach(p => {
-      p.isReady = false; p.role = null; p.inventory = []; p.isDead = false; p.lastKillTime = 0;
+      p.isReady = false; p.role = null; p.inventory = []; p.isDead = false; p.isEscaped = false; p.lastKillTime = 0;
   });
   io.emit('update_player_list', Object.values(players));
 }
@@ -122,7 +108,7 @@ function checkGameStart() {
 }
 
 function startGame() {
-  gameInProgress = true;
+  gameInProgress = true; escapePhaseActive = false;
   const playerIds = Object.keys(players);
   const killerIndex = Math.floor(Math.random() * playerIds.length);
   const killerId = playerIds[killerIndex];
@@ -133,7 +119,7 @@ function startGame() {
   playerIds.forEach(id => {
       players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
       players[id].inventory = []; players[id].lastCardPlayTime = 0;
-      players[id].isDead = false; players[id].lastKillTime = 0;
+      players[id].isDead = false; players[id].isEscaped = false; players[id].lastKillTime = 0;
 
       if (players[id].role === 'Killer') { drawCard(players[id]); drawCard(players[id]); drawCard(players[id]); }
       
@@ -149,15 +135,31 @@ function startGame() {
 
 function broadcastState() {
   const sanitizedPlayers = Object.values(players).map(p => ({
-      id: p.id, name: p.name, x: p.x, y: p.y, isDead: p.isDead
+      id: p.id, name: p.name, x: p.x, y: p.y, isDead: p.isDead, isEscaped: p.isEscaped
   }));
   io.emit('game_state_update', { players: sanitizedPlayers, effects: activeGlobalEffects });
+}
+
+// Check Win Conditions
+function evaluateWinCondition() {
+    const aliveCrew = Object.values(players).filter(p => p.role === 'Crewmate' && !p.isDead && !p.isEscaped);
+    const escapedCrew = Object.values(players).filter(p => p.role === 'Crewmate' && p.isEscaped);
+    
+    // If no one is left running around...
+    if (aliveCrew.length === 0) {
+        if (escapedCrew.length > 0) {
+            io.emit('game_over', { winner: 'Crewmates', reason: `${escapedCrew.length} Crewmate(s) successfully escaped!` });
+        } else {
+            io.emit('game_over', { winner: 'Killer', reason: 'All crewmates eliminated.' });
+        }
+        resetGame();
+    }
 }
 
 io.on('connection', (socket) => {
   socket.on('join_lobby', (playerName) => {
       if (gameInProgress) { socket.emit('countdown_update', 'GAME IN PROGRESS.'); return; }
-      players[socket.id] = { id: socket.id, name: playerName || `Player_${Math.floor(Math.random() * 1000)}`, isReady: false, role: null, x: 0, y: 0, isDead: false, inventory: [] };
+      players[socket.id] = { id: socket.id, name: playerName || `Player_${Math.floor(Math.random() * 1000)}`, isReady: false, role: null, x: 0, y: 0, isDead: false, isEscaped: false, inventory: [] };
       io.emit('update_player_list', Object.values(players)); checkGameStart(); 
   });
 
@@ -166,7 +168,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('client_movement', (data) => {
-      if (!players[socket.id] || !gameInProgress || players[socket.id].isDead) return;
+      if (!players[socket.id] || !gameInProgress || players[socket.id].isDead || players[socket.id].isEscaped) return;
       const p = players[socket.id];
       const dx = data.x - p.x; const dy = data.y - p.y;
       if (Math.sqrt(dx * dx + dy * dy) > 100 || checkWallCollision(data.x, data.y)) {
@@ -183,9 +185,8 @@ io.on('connection', (socket) => {
       if (killer.lastKillTime && now - killer.lastKillTime < 20000) return; 
 
       let target = null; let closestDist = 60; 
-
       Object.values(players).forEach(p => {
-          if (p.role === 'Crewmate' && !p.isDead) {
+          if (p.role === 'Crewmate' && !p.isDead && !p.isEscaped) {
               const dist = Math.sqrt(Math.pow(killer.x - p.x, 2) + Math.pow(killer.y - p.y, 2));
               if (dist < closestDist) { closestDist = dist; target = p; }
           }
@@ -198,29 +199,60 @@ io.on('connection', (socket) => {
           io.emit('player_died', target.id);
           socket.emit('inventory_update', killer.inventory.map(c => CARD_DB[c]));
           socket.emit('kill_cooldown_started', 20000);
-
-          const aliveCrew = Object.values(players).filter(p => p.role === 'Crewmate' && !p.isDead);
-          if (aliveCrew.length === 0) {
-              io.emit('game_over', { winner: 'Killer', reason: 'All crewmates eliminated.' });
-              resetGame();
-          }
+          evaluateWinCondition();
       }
   });
 
   socket.on('task_completed', (taskId) => {
       const p = players[socket.id];
-      if (!p || p.role === 'Killer' || p.isDead) return; 
+      if (!p || p.role === 'Killer' || p.isDead || escapePhaseActive) return; 
       if (activeGlobalEffects['grid_overload']) return;
       
       tasksCompleted++;
       io.emit('task_progress_update', (tasksCompleted / totalTaskTarget) * 100);
-
       drawCard(p); socket.emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
 
+      // NEW: Trigger Escape Phase instead of Game Over
       if (tasksCompleted >= totalTaskTarget) {
-          io.emit('game_over', { winner: 'Crewmates', reason: 'All tasks completed!' });
-          resetGame();
+          escapePhaseActive = true;
+          io.emit('escape_phase_started');
+          io.emit('system_message', "ALL TASKS COMPLETE. ESCAPE PODS ONLINE.");
+          
+          // Give killer a full hand to aid in stopping the escape
+          const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
+          if (killerId && players[killerId]) {
+              while (players[killerId].inventory.length < 3) drawCard(players[killerId]);
+              io.to(killerId).emit('inventory_update', players[killerId].inventory.map(c => CARD_DB[c]));
+          }
       }
+  });
+
+  // NEW: Escape Pod Mechanics
+  socket.on('start_pod_channel', () => {
+      if (activeGlobalEffects['pod_lockdown']) return;
+      // Alert the killer that a pod is being boarded
+      const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
+      if (killerId) io.to(killerId).emit('killer_pod_alert', true);
+  });
+
+  socket.on('cancel_pod_channel', () => {
+      const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
+      if (killerId) io.to(killerId).emit('killer_pod_alert', false);
+  });
+
+  socket.on('pod_escaped', () => {
+      const p = players[socket.id];
+      if (!p || p.role !== 'Crewmate' || p.isDead || activeGlobalEffects['pod_lockdown']) return;
+      
+      p.isEscaped = true;
+      io.emit('system_message', `${p.name} HAS ESCAPED!`);
+      socket.emit('player_escaped_success');
+      
+      // Stop the killer alert just in case
+      const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
+      if (killerId) io.to(killerId).emit('killer_pod_alert', false);
+
+      evaluateWinCondition();
   });
 
   socket.on('play_card', (cardIndex) => {
@@ -250,43 +282,24 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', (reason) => {
-      console.log(`Player ${socket.id} disconnected. Reason: ${reason}`);
       if (players[socket.id]) {
           const p = players[socket.id];
-          const wasKiller = p.role === 'Killer';
-          const wasCrewmate = p.role === 'Crewmate';
-
+          const wasKiller = p.role === 'Killer'; const wasCrewmate = p.role === 'Crewmate';
           delete players[socket.id]; 
 
           if (!gameInProgress) {
-              io.emit('update_player_list', Object.values(players));
-              checkGameStart(); 
+              io.emit('update_player_list', Object.values(players)); checkGameStart(); 
           } else {
-              // MID-GAME DISCONNECT LOGIC
               if (wasKiller) {
-                  io.emit('game_over', { winner: 'Crewmates', reason: 'The Killer disconnected.' });
-                  resetGame();
+                  io.emit('game_over', { winner: 'Crewmates', reason: 'The Killer disconnected.' }); resetGame();
               } else if (wasCrewmate) {
-                  const aliveCrew = Object.values(players).filter(pl => pl.role === 'Crewmate' && !pl.isDead);
+                  evaluateWinCondition(); // Re-evaluate in case they were the last one
                   
-                  if (aliveCrew.length === 0) {
-                      io.emit('game_over', { winner: 'Killer', reason: 'All crewmates eliminated or disconnected.' });
-                      resetGame();
-                  } else {
-                      // Adjust task requirements fairly!
-                      if (!p.isDead) {
-                          totalTaskTarget = Math.max(1, totalTaskTarget - GAME_TASKS.length);
-                      }
-                      io.emit('task_progress_update', (tasksCompleted / totalTaskTarget) * 100);
-                      
-                      // Broadcast silent notification instead of ugly alert
-                      io.emit('system_message', `${p.name} disconnected. Ship tasks recalibrated.`);
-                      
-                      io.emit('game_state_update', {
-                          players: Object.values(players).map(pl => ({ id: pl.id, name: pl.name, x: pl.x, y: pl.y, isDead: pl.isDead })),
-                          effects: activeGlobalEffects
-                      });
+                  if (!p.isDead && !p.isEscaped && !escapePhaseActive) {
+                      totalTaskTarget = Math.max(1, totalTaskTarget - GAME_TASKS.length);
                   }
+                  io.emit('task_progress_update', (tasksCompleted / totalTaskTarget) * 100);
+                  io.emit('system_message', `${p.name} disconnected.`);
               }
           }
       }
@@ -294,4 +307,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => { console.log(`Sabotage Escape server running on port ${PORT}`); });
+server.listen(PORT, () => { console.log(`Sabotage server running on port ${PORT}`); });
