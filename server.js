@@ -28,10 +28,16 @@ let gameLoopInterval = null;
 const MAP_SIZE = 2000; 
 const TICK_RATE = 1000 / 20; 
 
-// NEW: The Tasks! Placed in a row near the center.
+// EXPANDED TASKS: Spread across the map with new types
 const GAME_TASKS = [
-    { id: 'task_1', type: 'wiring', name: 'Fix Power Routing', x: 900, y: 1050 },
-    { id: 'task_2', type: 'download', name: 'Download Nav Data', x: 1100, y: 1050 }
+    { id: 'task_1', type: 'wiring', name: 'Fix North Power Routing', x: 1000, y: 300 },
+    { id: 'task_2', type: 'download', name: 'Download Nav Data', x: 1700, y: 500 },
+    { id: 'task_3', type: 'keypad', name: 'Override Security', x: 1500, y: 1500 },
+    { id: 'task_4', type: 'primer', name: 'Prime Shields', x: 500, y: 1700 },
+    { id: 'task_5', type: 'wiring', name: 'Fix South O2 Filters', x: 1000, y: 1800 },
+    { id: 'task_6', type: 'download', name: 'Sync Database', x: 300, y: 1000 },
+    { id: 'task_7', type: 'keypad', name: 'Unlock Medbay', x: 300, y: 400 },
+    { id: 'task_8', type: 'primer', name: 'Reboot Reactor', x: 1700, y: 1000 },
 ];
 
 let totalTaskTarget = 0; 
@@ -89,7 +95,7 @@ function startGame() {
             playersInGame: playerIds.length,
             startX: startX,   
             startY: startY,
-            tasks: GAME_TASKS // Send the task list to the clients
+            tasks: GAME_TASKS 
         });
     });
 
@@ -152,21 +158,17 @@ io.on('connection', (socket) => {
         }
     });
 
-    // NEW: Handle Task Completion
     socket.on('task_completed', (taskId) => {
-        if (!players[socket.id] || players[socket.id].role === 'Killer') return; // Killers can't do tasks!
+        if (!players[socket.id] || players[socket.id].role === 'Killer') return; 
         
         tasksCompleted++;
         const progressPercent = (tasksCompleted / totalTaskTarget) * 100;
         
-        // Tell everyone to update their bar
         io.emit('task_progress_update', progressPercent);
 
-        // Win condition check
         if (tasksCompleted >= totalTaskTarget) {
             console.log("CREWMATES WIN!");
             io.emit('game_over', { winner: 'Crewmates', reason: 'All tasks completed!' });
-            // We will build the actual game reset logic later
         }
     });
 
