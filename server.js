@@ -24,24 +24,70 @@ let countdownInterval = null;
 let gameInProgress = false; 
 let gameLoopInterval = null; 
 
-// --- CONSTANTS & MAP DATA ---
+// --- CONSTANTS & MAP GEOMETRY ---
 const MAP_SIZE = 2000; 
 const TICK_RATE = 1000 / 20; 
 
-// EXPANDED TASKS: Spread across the map with new types
+// NEW: The Wall Geometry! 
+const MAP_WALLS = [
+    // Outer Boundaries
+    { x: -50, y: -50, w: 2100, h: 50 },
+    { x: -50, y: 2000, w: 2100, h: 50 },
+    { x: -50, y: 0, w: 50, h: 2000 },
+    { x: 2000, y: 0, w: 50, h: 2000 },
+
+    // L-Shaped Corner Rooms (Creates Hallways)
+    { x: 200, y: 200, w: 600, h: 200 }, { x: 200, y: 400, w: 200, h: 400 },     // Top Left
+    { x: 1200, y: 200, w: 600, h: 200 }, { x: 1600, y: 400, w: 200, h: 400 },   // Top Right
+    { x: 200, y: 1600, w: 600, h: 200 }, { x: 200, y: 1200, w: 200, h: 400 },   // Bottom Left
+    { x: 1200, y: 1600, w: 600, h: 200 }, { x: 1600, y: 1200, w: 200, h: 400 }, // Bottom Right
+
+    // Center Room Outer Shell (with 4 doors)
+    { x: 800, y: 800, w: 150, h: 20 }, { x: 1050, y: 800, w: 150, h: 20 },
+    { x: 800, y: 1180, w: 150, h: 20 }, { x: 1050, y: 1180, w: 150, h: 20 },
+    { x: 800, y: 800, w: 20, h: 150 }, { x: 800, y: 1050, w: 20, h: 150 },
+    { x: 1180, y: 800, w: 20, h: 150 }, { x: 1180, y: 1050, w: 20, h: 150 },
+
+    // 4 Central Pillars (For Cover!)
+    { x: 900, y: 900, w: 40, h: 40 }, { x: 1060, y: 900, w: 40, h: 40 },
+    { x: 900, y: 1060, w: 40, h: 40 }, { x: 1060, y: 1060, w: 40, h: 40 }
+];
+
+// UPDATED: Tasks moved so they are not inside walls!
 const GAME_TASKS = [
-    { id: 'task_1', type: 'wiring', name: 'Fix North Power Routing', x: 1000, y: 300 },
-    { id: 'task_2', type: 'download', name: 'Download Nav Data', x: 1700, y: 500 },
+    { id: 'task_1', type: 'wiring', name: 'Fix North Power Routing', x: 1000, y: 150 },
+    { id: 'task_2', type: 'download', name: 'Download Nav Data', x: 1900, y: 500 },
     { id: 'task_3', type: 'keypad', name: 'Override Security', x: 1500, y: 1500 },
-    { id: 'task_4', type: 'primer', name: 'Prime Shields', x: 500, y: 1700 },
-    { id: 'task_5', type: 'wiring', name: 'Fix South O2 Filters', x: 1000, y: 1800 },
-    { id: 'task_6', type: 'download', name: 'Sync Database', x: 300, y: 1000 },
-    { id: 'task_7', type: 'keypad', name: 'Unlock Medbay', x: 300, y: 400 },
-    { id: 'task_8', type: 'primer', name: 'Reboot Reactor', x: 1700, y: 1000 },
+    { id: 'task_4', type: 'primer', name: 'Prime Shields', x: 500, y: 1900 },
+    { id: 'task_5', type: 'wiring', name: 'Fix South O2 Filters', x: 1000, y: 1850 },
+    { id: 'task_6', type: 'download', name: 'Sync Database', x: 100, y: 1000 },
+    { id: 'task_7', type: 'keypad', name: 'Unlock Medbay', x: 100, y: 400 },
+    { id: 'task_8', type: 'primer', name: 'Reboot Reactor', x: 1900, y: 1000 },
 ];
 
 let totalTaskTarget = 0; 
 let tasksCompleted = 0;
+
+// NEW: Server-Side Collision Helper
+function isColliding(playerX, playerY, radius) {
+    for (let wall of MAP_WALLS) {
+        let testX = playerX;
+        let testY = playerY;
+
+        if (playerX < wall.x) testX = wall.x;
+        else if (playerX > wall.x + wall.w) testX = wall.x + wall.w;
+
+        if (playerY < wall.y) testY = wall.y;
+        else if (playerY > wall.y + wall.h) testY = wall.y + wall.h;
+
+        let distX = playerX - testX;
+        let distY = playerY - testY;
+        if (Math.sqrt((distX*distX) + (distY*distY)) <= radius) {
+            return true;
+        }
+    }
+    return false;
+}
 
 function checkGameStart() {
     const playerArray = Object.values(players);
@@ -72,20 +118,18 @@ function checkGameStart() {
 function startGame() {
     gameInProgress = true;
     const playerIds = Object.keys(players);
-    
     const killerIndex = Math.floor(Math.random() * playerIds.length);
     const killerId = playerIds[killerIndex];
 
-    // Reset Task Progress
     tasksCompleted = 0;
-    // Target = (Total Players - 1 Killer) * Number of Tasks
     totalTaskTarget = (playerIds.length - 1) * GAME_TASKS.length;
 
     playerIds.forEach(id => {
         players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
         
-        const startX = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
-        const startY = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
+        // Spawn players safely inside the center room
+        const startX = 1000 + (Math.random() * 40 - 20);
+        const startY = 1000 + (Math.random() * 40 - 20);
         
         players[id].x = startX;
         players[id].y = startY;
@@ -99,7 +143,7 @@ function startGame() {
         });
     });
 
-    console.log(`Game started! ${players[killerId].name} is the Killer. Task Target: ${totalTaskTarget}`);
+    console.log(`Game started! ${players[killerId].name} is the Killer.`);
     gameLoopInterval = setInterval(broadcastState, TICK_RATE);
 }
 
@@ -150,11 +194,12 @@ io.on('connection', (socket) => {
         const dy = data.y - p.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance > 100) {
+        // Anti-Cheat: Validate distance AND check if they are trying to clip into a wall
+        if (distance > 100 || isColliding(data.x, data.y, 15)) {
             socket.emit('server_correction', { x: p.x, y: p.y });
         } else {
-            p.x = Math.max(10, Math.min(MAP_SIZE - 10, data.x));
-            p.y = Math.max(10, Math.min(MAP_SIZE - 10, data.y));
+            p.x = Math.max(15, Math.min(MAP_SIZE - 15, data.x));
+            p.y = Math.max(15, Math.min(MAP_SIZE - 15, data.y));
         }
     });
 
