@@ -138,6 +138,8 @@ function startGame() {
         const startX = 1000 + (Math.random() * 40 - 20);
         const startY = 1000 + (Math.random() * 40 - 20);
         players[id].x = startX; players[id].y = startY;
+        players[id].isDead = false;
+        players[id].lastKillTime = 0;
 
         io.to(id).emit('game_start', {
             role: players[id].role,
@@ -250,6 +252,58 @@ io.on('connection', (socket) => {
                 }
             }, cardData.duration);
         }
+        // --- NEW: Kill Mechanic ---
+    socket.on('request_kill', () => {
+        const killer = players[socket.id];
+        if (!killer || killer.role !== 'Killer' || !gameInProgress) return;
+
+        // 1. Check Killer Cooldown (Server side enforcement)
+        const now = Date.now();
+        if (killer.lastKillTime && now - killer.lastKillTime < 20000) return; // 20s Cooldown
+
+        // 2. Find closest crewmate in range
+        let target = null;
+        let closestDist = 60; // Kill range
+
+        Object.values(players).forEach(p => {
+            if (p.role === 'Crewmate' && !p.isDead) {
+                const dx = killer.x - p.x;
+                const dy = killer.y - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    target = p;
+                }
+            }
+        });
+
+        if (target) {
+            // 3. Execute Kill
+            target.isDead = true;
+            killer.lastKillTime = now;
+
+            // 4. Killer Reward: Refill Hand to 3 Cards
+            while (killer.inventory.length < 3) {
+                drawCard(killer);
+            }
+
+            // 5. Broadcast events
+            io.emit('player_died', target.id);
+            io.emit('effect_triggered', "CREW ELIMINATED"); // Visual/Sound cue
+            
+            // Send updated inventory back to killer
+            socket.emit('inventory_update', killer.inventory.map(c => CARD_DB[c]));
+            
+            // Trigger 20s cooldown UI for killer
+            socket.emit('kill_cooldown_started', 20000);
+
+            // 6. Check Win Condition (Are all crewmates dead?)
+            const aliveCrew = Object.values(players).filter(p => p.role === 'Crewmate' && !p.isDead);
+            if (aliveCrew.length === 0) {
+                io.emit('game_over', { winner: 'Killer', reason: 'All crewmates eliminated.' });
+            }
+        }
+    });
     });
 
     // --- NEW: Discard Logic (Killer Only) ---
