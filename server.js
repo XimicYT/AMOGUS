@@ -26,8 +26,8 @@ const CARD_DB = {
   short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision to 2 meters." },
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
   gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
-  grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
-  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds."}
+  grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock tasks & cards map-wide." },
+  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20s."}
 };
 
 let activeGlobalEffects = {}; 
@@ -80,9 +80,9 @@ function drawCard(player) {
 function resetGame() {
   gameInProgress = false;
   if (gameLoopInterval) { clearInterval(gameLoopInterval); gameLoopInterval = null; }
-  activeGlobalEffects = {};
+  activeGlobalEffects = {}; 
   Object.values(players).forEach(p => {
-      p.isReady = false; p.role = null; p.inventory = []; p.isDead = false; p.isEscaped = false; p.lastKillTime = 0; p.tasksLeft = 0;
+      p.isReady = false; p.role = null; p.inventory = []; p.isDead = false; p.isEscaped = false; p.lastKillTime = 0; p.tasks = [];
   });
   io.emit('update_player_list', Object.values(players));
 }
@@ -109,26 +109,30 @@ function startGame() {
   const killerId = playerIds[killerIndex];
 
   playerIds.forEach(id => {
-      players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
-      players[id].inventory = []; players[id].lastCardPlayTime = 0;
-      players[id].isDead = false; players[id].isEscaped = false; players[id].lastKillTime = 0;
+      let p = players[id];
+      p.role = (id === killerId) ? 'Killer' : 'Crewmate';
+      p.inventory = []; p.lastCardPlayTime = 0;
+      p.isDead = false; p.isEscaped = false; p.lastKillTime = 0;
 
-      let assignedTasks = [];
-      if (players[id].role === 'Crewmate') {
-          // Shuffle tasks and assign 4 unique tasks per Crewmate
-          let shuffled = [...GAME_TASKS].sort(() => 0.5 - Math.random());
-          assignedTasks = shuffled.slice(0, 4);
-          players[id].tasksLeft = assignedTasks.length;
+      // Assign Individual Tasks
+      if (p.role === 'Crewmate') {
+          let shuffled = GAME_TASKS.sort(() => 0.5 - Math.random());
+          p.tasks = shuffled.slice(0, 5); // 5 Tasks per crewmate
       } else {
-          // Killer gets a starting hand
-          drawCard(players[id]); drawCard(players[id]); drawCard(players[id]);
+          p.tasks = [];
+          drawCard(p); drawCard(p); drawCard(p); // Killer starts full
       }
       
       const startX = 1000 + (Math.random() * 40 - 20); const startY = 1000 + (Math.random() * 40 - 20);
-      players[id].x = startX; players[id].y = startY;
+      p.x = startX; p.y = startY;
 
-      io.to(id).emit('game_start', { role: players[id].role, playersInGame: playerIds.length, startX: startX, startY: startY, tasks: assignedTasks, walls: MAP_WALLS });
-      io.to(id).emit('inventory_update', players[id].inventory.map(c => CARD_DB[c]));
+      io.to(id).emit('game_start', { 
+          role: p.role, 
+          startX: startX, startY: startY, 
+          tasks: p.tasks, // Sending personal task list!
+          walls: MAP_WALLS 
+      });
+      io.to(id).emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
   });
 
   gameLoopInterval = setInterval(broadcastState, TICK_RATE);
@@ -141,17 +145,18 @@ function broadcastState() {
   io.emit('game_state_update', { players: sanitizedPlayers, effects: activeGlobalEffects });
 }
 
-// THE TRUE ENDGAME CHECK
+// WIN CONDITION: Are there any crew left to play?
 function evaluateWinCondition() {
-    const aliveCrew = Object.values(players).filter(p => p.role === 'Crewmate' && !p.isDead && !p.isEscaped);
-    const escapedCrew = Object.values(players).filter(p => p.role === 'Crewmate' && p.isEscaped);
+    const crew = Object.values(players).filter(p => p.role === 'Crewmate');
+    const activeCrew = crew.filter(p => !p.isDead && !p.isEscaped);
+    const escapedCrew = crew.filter(p => p.isEscaped);
     
-    // The game ONLY ends when there are no more active crewmates running around
-    if (aliveCrew.length === 0) {
+    // If the ship is entirely devoid of living, running crewmates...
+    if (activeCrew.length === 0 && crew.length > 0) {
         if (escapedCrew.length > 0) {
             io.emit('game_over', { winner: 'Crewmates', reason: `${escapedCrew.length} Crewmate(s) successfully escaped!` });
         } else {
-            io.emit('game_over', { winner: 'Killer', reason: 'All crewmates were eliminated.' });
+            io.emit('game_over', { winner: 'Killer', reason: 'All crewmates eliminated.' });
         }
         resetGame();
     }
@@ -160,7 +165,7 @@ function evaluateWinCondition() {
 io.on('connection', (socket) => {
   socket.on('join_lobby', (playerName) => {
       if (gameInProgress) { socket.emit('countdown_update', 'GAME IN PROGRESS.'); return; }
-      players[socket.id] = { id: socket.id, name: playerName || `Player_${Math.floor(Math.random() * 1000)}`, isReady: false, role: null, x: 0, y: 0, isDead: false, isEscaped: false, inventory: [] };
+      players[socket.id] = { id: socket.id, name: playerName || `Player_${Math.floor(Math.random() * 1000)}`, isReady: false, role: null, x: 0, y: 0, isDead: false, isEscaped: false, inventory: [], tasks: [] };
       io.emit('update_player_list', Object.values(players)); checkGameStart(); 
   });
 
@@ -177,6 +182,7 @@ io.on('connection', (socket) => {
       } else { p.x = data.x; p.y = data.y; }
   });
 
+  // KILL MECHANIC
   socket.on('request_kill', () => {
       const killer = players[socket.id];
       if (!killer || killer.role !== 'Killer' || !gameInProgress) return;
@@ -194,7 +200,7 @@ io.on('connection', (socket) => {
 
       if (target) {
           target.isDead = true; killer.lastKillTime = now;
-          while (killer.inventory.length < 3) { drawCard(killer); }
+          while (killer.inventory.length < 3) { drawCard(killer); } // Killer reward
 
           io.emit('player_died', target.id);
           socket.emit('inventory_update', killer.inventory.map(c => CARD_DB[c]));
@@ -203,23 +209,28 @@ io.on('connection', (socket) => {
       }
   });
 
+  // INDIVIDUAL TASK PROGRESSION
   socket.on('task_completed', (taskId) => {
       const p = players[socket.id];
-      if (!p || p.role === 'Killer' || p.isDead || p.isEscaped) return; 
+      if (!p || p.role === 'Killer' || p.isDead) return; 
       if (activeGlobalEffects['grid_overload']) return;
       
-      p.tasksLeft = Math.max(0, p.tasksLeft - 1);
-      drawCard(p); 
-      socket.emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
-      
-      // Notice: No global escape trigger here. Escape is personal now.
+      // Mark task as done server side
+      const taskIndex = p.tasks.findIndex(t => t.id === taskId);
+      if (taskIndex > -1) {
+          p.tasks.splice(taskIndex, 1);
+          drawCard(p); 
+          socket.emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
+          
+          if (p.tasks.length === 0) {
+             socket.emit('system_message', "ALL TASKS COMPLETE. SHED CARDS TO ESCAPE.");
+          }
+      }
   });
 
+  // POD MECHANICS
   socket.on('start_pod_channel', () => {
-      const p = players[socket.id];
-      if (!p || p.role !== 'Crewmate' || p.tasksLeft > 0 || p.inventory.length > 0) return; // Anti-cheat
       if (activeGlobalEffects['pod_lockdown']) return;
-      
       const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
       if (killerId) io.to(killerId).emit('killer_pod_alert', true);
   });
@@ -232,8 +243,10 @@ io.on('connection', (socket) => {
   socket.on('pod_escaped', () => {
       const p = players[socket.id];
       if (!p || p.role !== 'Crewmate' || p.isDead || activeGlobalEffects['pod_lockdown']) return;
-      if (p.tasksLeft > 0 || p.inventory.length > 0) return; // Anti-cheat
       
+      // Strict Anti-Cheat Validation: 0 Tasks, 0 Cards
+      if (p.tasks.length > 0 || p.inventory.length > 0) return;
+
       p.isEscaped = true;
       io.emit('system_message', `${p.name} HAS ESCAPED!`);
       socket.emit('player_escaped_success');
@@ -247,6 +260,8 @@ io.on('connection', (socket) => {
   socket.on('play_card', (cardIndex) => {
       const p = players[socket.id];
       if (!p || !gameInProgress || p.isDead) return;
+      if (activeGlobalEffects['grid_overload']) return; // Cannot play during Grid Overload!
+
       const now = Date.now();
       if (now - p.lastCardPlayTime < 10000) return; 
       if (cardIndex >= 0 && cardIndex < p.inventory.length) {
@@ -282,7 +297,7 @@ io.on('connection', (socket) => {
               if (wasKiller) {
                   io.emit('game_over', { winner: 'Crewmates', reason: 'The Killer disconnected.' }); resetGame();
               } else if (wasCrewmate) {
-                  evaluateWinCondition(); 
+                  evaluateWinCondition(); // Recalculate if they were the last crewmate
                   io.emit('system_message', `${p.name} disconnected.`);
               }
           }
