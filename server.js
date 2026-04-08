@@ -22,13 +22,11 @@ const io = new Server(server, {
 const players = {};
 let countdownInterval = null;
 let gameInProgress = false; 
-let gameLoopInterval = null; // The physics engine loop
+let gameLoopInterval = null; 
 
 // --- CONSTANTS ---
-const CANVAS_WIDTH = 800;
-const CANVAS_HEIGHT = 600;
-const PLAYER_SPEED = 5;
-const TICK_RATE = 1000 / 30; // 30 Frames Per Second
+const MAP_SIZE = 2000; // Expanded Map!
+const TICK_RATE = 1000 / 20; // Broadcast 20 times a second
 
 function checkGameStart() {
     const playerArray = Object.values(players);
@@ -61,60 +59,41 @@ function startGame() {
     gameInProgress = true;
     const playerIds = Object.keys(players);
     
-    // Pick 1 random Killer
     const killerIndex = Math.floor(Math.random() * playerIds.length);
     const killerId = playerIds[killerIndex];
 
-    // Assign roles and setup positions
     playerIds.forEach(id => {
         players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
         
-        // Spawn players in the center of the map with a slight random offset
-        players[id].x = (CANVAS_WIDTH / 2) + (Math.random() * 40 - 20);
-        players[id].y = (CANVAS_HEIGHT / 2) + (Math.random() * 40 - 20);
+        // Spawn players in the center of the 2000x2000 map
+        const startX = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
+        const startY = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
         
-        // Track what keys they are pressing
-        players[id].inputs = { up: false, down: false, left: false, right: false };
+        players[id].x = startX;
+        players[id].y = startY;
 
-        // Send a PRIVATE message to this specific socket ID
         io.to(id).emit('game_start', {
             role: players[id].role,
-            playersInGame: playerIds.length
+            playersInGame: playerIds.length,
+            startX: startX,   // Tell the client exactly where to spawn
+            startY: startY
         });
     });
 
     console.log(`Game started! ${players[killerId].name} is the Killer.`);
 
-    // Start the server physics loop
-    gameLoopInterval = setInterval(updatePhysics, TICK_RATE);
+    // Start broadcasting state
+    gameLoopInterval = setInterval(broadcastState, TICK_RATE);
 }
 
-// --- The Core Movement Engine ---
-function updatePhysics() {
-    const sanitizedPlayers = []; // We use this to hide roles from the network payload
-
-    Object.values(players).forEach(p => {
-        // Apply movement based on inputs
-        if (p.inputs.up) p.y -= PLAYER_SPEED;
-        if (p.inputs.down) p.y += PLAYER_SPEED;
-        if (p.inputs.left) p.x -= PLAYER_SPEED;
-        if (p.inputs.right) p.x += PLAYER_SPEED;
-
-        // Keep players inside the bounds of the 800x600 map
-        p.x = Math.max(10, Math.min(CANVAS_WIDTH - 10, p.x));
-        p.y = Math.max(10, Math.min(CANVAS_HEIGHT - 10, p.y));
-
-        // Package safe data to send to clients
-        sanitizedPlayers.push({
-            id: p.id,
-            name: p.name,
-            x: p.x,
-            y: p.y
-            // Notice: 'role' is intentionally left out!
-        });
-    });
-
-    // Broadcast the new positions to everyone
+// --- Broadcasting Engine ---
+function broadcastState() {
+    const sanitizedPlayers = Object.values(players).map(p => ({
+        id: p.id,
+        name: p.name,
+        x: p.x,
+        y: p.y
+    }));
     io.emit('game_state_update', sanitizedPlayers);
 }
 
@@ -132,8 +111,7 @@ io.on('connection', (socket) => {
             isReady: false,
             role: null,
             x: 0,
-            y: 0,
-            inputs: { up: false, down: false, left: false, right: false }
+            y: 0
         };
 
         io.emit('update_player_list', Object.values(players));
@@ -148,10 +126,25 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- Listen for keyboard inputs from the client ---
-    socket.on('player_input', (inputs) => {
-        if (players[socket.id] && gameInProgress) {
-            players[socket.id].inputs = inputs;
+    // --- Client-Side Prediction Validator (The Double Check) ---
+    socket.on('client_movement', (data) => {
+        if (!players[socket.id] || !gameInProgress) return;
+        
+        const p = players[socket.id];
+        
+        // Anti-Cheat / Lag Check: Calculate how far they tried to move
+        const dx = data.x - p.x;
+        const dy = data.y - p.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // If they moved an impossibly large distance instantly (speed hacking or desync)
+        if (distance > 100) {
+            // REJECT: Force them back to the last known valid server position
+            socket.emit('server_correction', { x: p.x, y: p.y });
+        } else {
+            // ACCEPT: Update the server's official record of their position
+            p.x = Math.max(10, Math.min(MAP_SIZE - 10, data.x));
+            p.y = Math.max(10, Math.min(MAP_SIZE - 10, data.y));
         }
     });
 
