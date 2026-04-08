@@ -21,7 +21,14 @@ const io = new Server(server, {
 
 const players = {};
 let countdownInterval = null;
-let gameInProgress = false; // NEW: Prevent new players from joining mid-game
+let gameInProgress = false; 
+let gameLoopInterval = null; // The physics engine loop
+
+// --- CONSTANTS ---
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+const PLAYER_SPEED = 5;
+const TICK_RATE = 1000 / 30; // 30 Frames Per Second
 
 function checkGameStart() {
     const playerArray = Object.values(players);
@@ -37,7 +44,7 @@ function checkGameStart() {
                 io.emit('countdown_update', `BREACH IMMINENT IN ${timeLeft}...`);
             } else {
                 clearInterval(countdownInterval);
-                startGame(); // NEW: Call the start game logic
+                startGame(); 
             }
         }, 1000);
     } else {
@@ -49,7 +56,7 @@ function checkGameStart() {
     }
 }
 
-// --- NEW: Role Assignment Logic ---
+// --- Role Assignment & Spawn Logic ---
 function startGame() {
     gameInProgress = true;
     const playerIds = Object.keys(players);
@@ -58,14 +65,16 @@ function startGame() {
     const killerIndex = Math.floor(Math.random() * playerIds.length);
     const killerId = playerIds[killerIndex];
 
-    // Assign roles and send private messages
+    // Assign roles and setup positions
     playerIds.forEach(id => {
-        if (id === killerId) {
-            players[id].role = 'Killer';
-        } else {
-            players[id].role = 'Crewmate';
-            // Future: Assign 3-7 tasks here based on player count
-        }
+        players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
+        
+        // Spawn players in the center of the map with a slight random offset
+        players[id].x = (CANVAS_WIDTH / 2) + (Math.random() * 40 - 20);
+        players[id].y = (CANVAS_HEIGHT / 2) + (Math.random() * 40 - 20);
+        
+        // Track what keys they are pressing
+        players[id].inputs = { up: false, down: false, left: false, right: false };
 
         // Send a PRIVATE message to this specific socket ID
         io.to(id).emit('game_start', {
@@ -75,8 +84,39 @@ function startGame() {
     });
 
     console.log(`Game started! ${players[killerId].name} is the Killer.`);
+
+    // Start the server physics loop
+    gameLoopInterval = setInterval(updatePhysics, TICK_RATE);
 }
-// --------------------------------------------------------
+
+// --- The Core Movement Engine ---
+function updatePhysics() {
+    const sanitizedPlayers = []; // We use this to hide roles from the network payload
+
+    Object.values(players).forEach(p => {
+        // Apply movement based on inputs
+        if (p.inputs.up) p.y -= PLAYER_SPEED;
+        if (p.inputs.down) p.y += PLAYER_SPEED;
+        if (p.inputs.left) p.x -= PLAYER_SPEED;
+        if (p.inputs.right) p.x += PLAYER_SPEED;
+
+        // Keep players inside the bounds of the 800x600 map
+        p.x = Math.max(10, Math.min(CANVAS_WIDTH - 10, p.x));
+        p.y = Math.max(10, Math.min(CANVAS_HEIGHT - 10, p.y));
+
+        // Package safe data to send to clients
+        sanitizedPlayers.push({
+            id: p.id,
+            name: p.name,
+            x: p.x,
+            y: p.y
+            // Notice: 'role' is intentionally left out!
+        });
+    });
+
+    // Broadcast the new positions to everyone
+    io.emit('game_state_update', sanitizedPlayers);
+}
 
 io.on('connection', (socket) => {
     console.log(`A player connected: ${socket.id}`);
@@ -90,19 +130,28 @@ io.on('connection', (socket) => {
             id: socket.id,
             name: playerName || `Player_${Math.floor(Math.random() * 1000)}`,
             isReady: false,
-            role: null 
+            role: null,
+            x: 0,
+            y: 0,
+            inputs: { up: false, down: false, left: false, right: false }
         };
 
         io.emit('update_player_list', Object.values(players));
-        checkGameStart(); // Check in case joining altered the state
+        checkGameStart(); 
     });
 
-    // --- NEW: Handle Ready Toggle ---
     socket.on('toggle_ready', () => {
         if (players[socket.id]) {
             players[socket.id].isReady = !players[socket.id].isReady;
             io.emit('update_player_list', Object.values(players));
-            checkGameStart(); // Re-evaluate if we should start the timer
+            checkGameStart(); 
+        }
+    });
+
+    // --- Listen for keyboard inputs from the client ---
+    socket.on('player_input', (inputs) => {
+        if (players[socket.id] && gameInProgress) {
+            players[socket.id].inputs = inputs;
         }
     });
 
@@ -111,7 +160,7 @@ io.on('connection', (socket) => {
         if (players[socket.id]) {
             delete players[socket.id];
             io.emit('update_player_list', Object.values(players));
-            checkGameStart(); // Re-evaluate if someone leaving broke the ready state
+            checkGameStart(); 
         }
     });
 });
