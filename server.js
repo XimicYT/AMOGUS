@@ -12,7 +12,7 @@ app.get('/health', (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    path: '/api/game-data', // THE DISGUISE
+    path: '/api/game-data', 
     cors: {
         origin: "*", 
         methods: ["GET", "POST"]
@@ -24,9 +24,18 @@ let countdownInterval = null;
 let gameInProgress = false; 
 let gameLoopInterval = null; 
 
-// --- CONSTANTS ---
-const MAP_SIZE = 2000; // Expanded Map!
-const TICK_RATE = 1000 / 20; // Broadcast 20 times a second
+// --- CONSTANTS & MAP DATA ---
+const MAP_SIZE = 2000; 
+const TICK_RATE = 1000 / 20; 
+
+// NEW: The Tasks! Placed in a row near the center.
+const GAME_TASKS = [
+    { id: 'task_1', type: 'wiring', name: 'Fix Power Routing', x: 900, y: 1050 },
+    { id: 'task_2', type: 'download', name: 'Download Nav Data', x: 1100, y: 1050 }
+];
+
+let totalTaskTarget = 0; 
+let tasksCompleted = 0;
 
 function checkGameStart() {
     const playerArray = Object.values(players);
@@ -54,7 +63,6 @@ function checkGameStart() {
     }
 }
 
-// --- Role Assignment & Spawn Logic ---
 function startGame() {
     gameInProgress = true;
     const playerIds = Object.keys(players);
@@ -62,10 +70,14 @@ function startGame() {
     const killerIndex = Math.floor(Math.random() * playerIds.length);
     const killerId = playerIds[killerIndex];
 
+    // Reset Task Progress
+    tasksCompleted = 0;
+    // Target = (Total Players - 1 Killer) * Number of Tasks
+    totalTaskTarget = (playerIds.length - 1) * GAME_TASKS.length;
+
     playerIds.forEach(id => {
         players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
         
-        // Spawn players in the center of the 2000x2000 map
         const startX = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
         const startY = (MAP_SIZE / 2) + (Math.random() * 40 - 20);
         
@@ -75,18 +87,16 @@ function startGame() {
         io.to(id).emit('game_start', {
             role: players[id].role,
             playersInGame: playerIds.length,
-            startX: startX,   // Tell the client exactly where to spawn
-            startY: startY
+            startX: startX,   
+            startY: startY,
+            tasks: GAME_TASKS // Send the task list to the clients
         });
     });
 
-    console.log(`Game started! ${players[killerId].name} is the Killer.`);
-
-    // Start broadcasting state
+    console.log(`Game started! ${players[killerId].name} is the Killer. Task Target: ${totalTaskTarget}`);
     gameLoopInterval = setInterval(broadcastState, TICK_RATE);
 }
 
-// --- Broadcasting Engine ---
 function broadcastState() {
     const sanitizedPlayers = Object.values(players).map(p => ({
         id: p.id,
@@ -126,25 +136,37 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- Client-Side Prediction Validator (The Double Check) ---
     socket.on('client_movement', (data) => {
         if (!players[socket.id] || !gameInProgress) return;
         
         const p = players[socket.id];
-        
-        // Anti-Cheat / Lag Check: Calculate how far they tried to move
         const dx = data.x - p.x;
         const dy = data.y - p.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // If they moved an impossibly large distance instantly (speed hacking or desync)
         if (distance > 100) {
-            // REJECT: Force them back to the last known valid server position
             socket.emit('server_correction', { x: p.x, y: p.y });
         } else {
-            // ACCEPT: Update the server's official record of their position
             p.x = Math.max(10, Math.min(MAP_SIZE - 10, data.x));
             p.y = Math.max(10, Math.min(MAP_SIZE - 10, data.y));
+        }
+    });
+
+    // NEW: Handle Task Completion
+    socket.on('task_completed', (taskId) => {
+        if (!players[socket.id] || players[socket.id].role === 'Killer') return; // Killers can't do tasks!
+        
+        tasksCompleted++;
+        const progressPercent = (tasksCompleted / totalTaskTarget) * 100;
+        
+        // Tell everyone to update their bar
+        io.emit('task_progress_update', progressPercent);
+
+        // Win condition check
+        if (tasksCompleted >= totalTaskTarget) {
+            console.log("CREWMATES WIN!");
+            io.emit('game_over', { winner: 'Crewmates', reason: 'All tasks completed!' });
+            // We will build the actual game reset logic later
         }
     });
 
