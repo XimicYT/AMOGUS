@@ -7,13 +7,20 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+// --- NEW: Health Check Endpoint ---
+// Your cron job will ping https://amogus-fa5v.onrender.com/health
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', message: 'Sabotage server is alive!' });
+});
+// ----------------------------------
+
 // Create the HTTP server
 const server = http.createServer(app);
 
 // Initialize Socket.io with CORS enabled
 const io = new Server(server, {
     cors: {
-        origin: "*", // Change to your Netlify URL in production
+        origin: "*", // We will lock this down to your Netlify URL later
         methods: ["GET", "POST"]
     }
 });
