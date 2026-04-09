@@ -24,18 +24,18 @@ let activePodChanneler = null;
 const MAP_SIZE = 2000;
 const TICK_RATE = 1000 / 20;
 
-// 🃏 UPDATED CHAOS DECK
+// 🃏 EXPANDED CARD DATABASE
 const CARD_DB = {
   short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision heavily." },
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
+  flashbang: { id: "flashbang", name: "Flashbang", tier: 1, duration: 2000, desc: "Blinds all players, vision slowly returns." },
   adrenaline_surge: { id: "adrenaline_surge", name: "Adrenaline Surge", tier: 1, duration: 5000, desc: "30% speed boost to 50% of players." },
-  flashbang: { id: "flashbang", name: "Flashbang", tier: 1, duration: 2000, desc: "Total blindness for 2 seconds." },
   
   gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
   grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
-  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds." },
-  neural_scramble: { id: "neural_scramble", name: "Neural Scramble", tier: 2, duration: 5000, desc: "Inverts movement controls map-wide." },
-  task_wipe: { id: "task_wipe", name: "Task Wipe", tier: 2, duration: 0, desc: "Adds 1 task to 50% of active Crewmates." }
+  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds."},
+  neural_scramble: { id: "neural_scramble", name: "Neural Scramble", tier: 2, duration: 5000, desc: "Inverts movement keys for all players." },
+  task_wipe: { id: "task_wipe", name: "Task Wipe", tier: 2, duration: 0, desc: "Adds 1 task to 50% of Crewmates." }
 };
 
 let activeGlobalEffects = {}; 
@@ -176,13 +176,9 @@ io.on('connection', (socket) => {
       const p = players[socket.id];
       const dx = data.x - p.x; const dy = data.y - p.y;
       
-      if (p.isDead) {
-          p.x = data.x; p.y = data.y;
-          return;
-      }
+      if (p.isDead) { p.x = data.x; p.y = data.y; return; }
       
-      if (Math.sqrt(dx * dx + dy * dy) > 150) {
-          socket.emit('server_correction', { x: p.x, y: p.y });
+      if (Math.sqrt(dx * dx + dy * dy) > 150) { socket.emit('server_correction', { x: p.x, y: p.y });
       } else { p.x = data.x; p.y = data.y; }
   });
 
@@ -259,7 +255,7 @@ io.on('connection', (socket) => {
       evaluateWinCondition();
   });
 
-  // 🃏 UPDATED CARD PLAYING LOGIC
+  // 🃏 ADVANCED CARD PLAY LOGIC
   socket.on('play_card', (cardIndex) => {
       const p = players[socket.id];
       if (!p || !gameInProgress || p.isDead) return;
@@ -270,37 +266,32 @@ io.on('connection', (socket) => {
           const cardId = p.inventory[cardIndex]; const cardData = CARD_DB[cardId];
           p.inventory.splice(cardIndex, 1); p.lastCardPlayTime = now;
           
-          if (cardId === 'task_wipe') {
-              // 1. Task Wipe: Instant, permanent effect for 50% of living crew
-              let aliveCrew = Object.values(players).filter(pl => pl.role === 'Crewmate' && !pl.isDead && !pl.isEscaped);
-              let shuffledCrew = aliveCrew.sort(() => 0.5 - Math.random());
-              let targets = shuffledCrew.slice(0, Math.max(1, Math.ceil(aliveCrew.length / 2)));
-              
-              targets.forEach(target => {
-                  let randomTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
-                  let taskClone = { ...randomTask, id: `task_${Math.random().toString(36).substr(2, 9)}` };
-                  target.tasksLeft++;
-                  io.to(target.id).emit('task_added', taskClone);
+          if (cardId === 'adrenaline_surge') {
+              const activeIds = Object.keys(players).filter(id => !players[id].isDead);
+              const affected = activeIds.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(activeIds.length / 2));
+              activeGlobalEffects[cardId] = { expires: now + cardData.duration, affected: affected };
+          } 
+          else if (cardId === 'task_wipe') {
+              const crewIds = Object.keys(players).filter(id => players[id].role === 'Crewmate' && !players[id].isDead && !players[id].isEscaped);
+              const affected = crewIds.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(crewIds.length / 2));
+              affected.forEach(id => {
+                  players[id].tasksLeft++;
+                  const baseTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
+                  const taskInstance = { ...baseTask, id: 'task_' + Math.floor(Math.random()*100000) };
+                  io.to(id).emit('add_new_task', taskInstance);
               });
-              io.emit('system_message', 'WARNING: SYSTEM CORRUPTION - EXTRA TASKS ASSIGNED');
-              
-          } else if (cardId === 'adrenaline_surge') {
-              // 2. Adrenaline Surge: Targeted buff stored as an object instead of a timestamp
-              let allAlive = Object.keys(players).filter(id => !players[id].isDead && !players[id].isEscaped);
-              let shuffled = allAlive.sort(() => 0.5 - Math.random());
-              let targets = shuffled.slice(0, Math.ceil(allAlive.length / 2));
-              
-              activeGlobalEffects[cardId] = { expire: now + cardData.duration, targets: targets };
-              setTimeout(() => { if (activeGlobalEffects[cardId] && Date.now() >= activeGlobalEffects[cardId].expire) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
-              
-          } else {
-              // 3. Standard Duration Maps
+              io.emit('system_message', 'WARNING: CRITICAL TASK WIPE DETECTED');
+          } 
+          else {
               activeGlobalEffects[cardId] = now + cardData.duration;
-              setTimeout(() => { if (activeGlobalEffects[cardId] && Date.now() >= activeGlobalEffects[cardId]) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
           }
           
           socket.emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
           socket.emit('card_cooldown_started', 10000);
+
+          if (cardData.duration > 0) {
+              setTimeout(() => { if (activeGlobalEffects[cardId]) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
+          }
       }
   });
 
