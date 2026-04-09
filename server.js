@@ -24,7 +24,6 @@ let activePodChanneler = null;
 const MAP_SIZE = 2000;
 const TICK_RATE = 1000 / 20;
 
-// 🃏 EXPANDED CARD DATABASE
 const CARD_DB = {
   short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision heavily." },
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
@@ -53,6 +52,7 @@ const MAP_WALLS = [
   { x: 600, y: 600, w: 100, h: 100 }, { x: 1300, y: 600, w: 100, h: 100 }, { x: 600, y: 1300, w: 100, h: 100 }, { x: 1300, y: 1300, w: 100, h: 100 }
 ];
 
+// 🔧 ADDED NEW MINIGAMES TO THE TASK POOL
 const GAME_TASKS = [
   { id: 'task_1', type: 'wiring', name: 'Fix North Power', x: 1000, y: 300 },
   { id: 'task_2', type: 'download', name: 'Download Data', x: 1600, y: 400 },
@@ -62,6 +62,10 @@ const GAME_TASKS = [
   { id: 'task_6', type: 'download', name: 'Sync DB', x: 400, y: 400 },
   { id: 'task_7', type: 'keypad', name: 'Unlock Medbay', x: 300, y: 1000 },
   { id: 'task_8', type: 'primer', name: 'Reboot Reactor', x: 1700, y: 1000 },
+  { id: 'task_9', type: 'simon_says', name: 'Reboot Core Memory', x: 200, y: 800 },
+  { id: 'task_10', type: 'slider_calibration', name: 'Calibrate Thrusters', x: 1800, y: 800 },
+  { id: 'task_11', type: 'asteroid_defense', name: 'Clear Asteroids', x: 1000, y: 1000 },
+  { id: 'task_12', type: 'simon_says', name: 'Align Comm Array', x: 500, y: 200 }
 ];
 
 function drawCard(player) {
@@ -255,7 +259,6 @@ io.on('connection', (socket) => {
       evaluateWinCondition();
   });
 
-  // 🃏 ADVANCED CARD PLAY LOGIC
   socket.on('play_card', (cardIndex) => {
       const p = players[socket.id];
       if (!p || !gameInProgress || p.isDead) return;
