@@ -112,16 +112,20 @@ function startGame() {
           players[id].tasksLeft = assignedTasks.length;
       } else {
           drawCard(players[id]); drawCard(players[id]); drawCard(players[id]);
-          // 🔧 START KILLER COOLDOWN IMMEDIATELY
           players[id].lastKillTime = Date.now();
-          io.to(id).emit('kill_cooldown_started', 20000);
       }
       
       const startX = 1000 + (Math.random() * 40 - 20); const startY = 1000 + (Math.random() * 40 - 20);
       players[id].x = startX; players[id].y = startY;
 
+      // 1. Send the Game Start payload FIRST to reset client variables
       io.to(id).emit('game_start', { role: players[id].role, playersInGame: playerIds.length, startX: startX, startY: startY, tasks: assignedTasks, walls: MAP_WALLS });
       io.to(id).emit('inventory_update', players[id].inventory.map(c => CARD_DB[c]));
+
+      // 2. NOW emit the initial cooldown so it isn't overwritten!
+      if (players[id].role === 'Killer') {
+          io.to(id).emit('kill_cooldown_started', 20000);
+      }
   });
 
   gameLoopInterval = setInterval(broadcastState, TICK_RATE);
