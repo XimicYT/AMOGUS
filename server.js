@@ -15,21 +15,27 @@ const io = new Server(server, {
 });
 
 const players = {};
-let mapBodies = []; // 🔧 Stores dropped corpses
+let mapBodies = []; 
 let countdownInterval = null;
 let gameInProgress = false;
 let gameLoopInterval = null;
-let activePodChanneler = null; // 🔧 Global Pod Lock
+let activePodChanneler = null; 
 
 const MAP_SIZE = 2000;
 const TICK_RATE = 1000 / 20;
 
+// 🃏 UPDATED CHAOS DECK
 const CARD_DB = {
   short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision heavily." },
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
+  adrenaline_surge: { id: "adrenaline_surge", name: "Adrenaline Surge", tier: 1, duration: 5000, desc: "30% speed boost to 50% of players." },
+  flashbang: { id: "flashbang", name: "Flashbang", tier: 1, duration: 2000, desc: "Total blindness for 2 seconds." },
+  
   gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
   grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
-  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds."}
+  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds." },
+  neural_scramble: { id: "neural_scramble", name: "Neural Scramble", tier: 2, duration: 5000, desc: "Inverts movement controls map-wide." },
+  task_wipe: { id: "task_wipe", name: "Task Wipe", tier: 2, duration: 0, desc: "Adds 1 task to 50% of active Crewmates." }
 };
 
 let activeGlobalEffects = {}; 
@@ -118,11 +124,9 @@ function startGame() {
       const startX = 1000 + (Math.random() * 40 - 20); const startY = 1000 + (Math.random() * 40 - 20);
       players[id].x = startX; players[id].y = startY;
 
-      // 1. Send the Game Start payload FIRST to reset client variables
       io.to(id).emit('game_start', { role: players[id].role, playersInGame: playerIds.length, startX: startX, startY: startY, tasks: assignedTasks, walls: MAP_WALLS });
       io.to(id).emit('inventory_update', players[id].inventory.map(c => CARD_DB[c]));
 
-      // 2. NOW emit the initial cooldown so it isn't overwritten!
       if (players[id].role === 'Killer') {
           io.to(id).emit('kill_cooldown_started', 20000);
       }
@@ -172,7 +176,6 @@ io.on('connection', (socket) => {
       const p = players[socket.id];
       const dx = data.x - p.x; const dy = data.y - p.y;
       
-      // 🔧 ALLOW GHOSTS TO MOVE FREELY (No correction logic)
       if (p.isDead) {
           p.x = data.x; p.y = data.y;
           return;
@@ -200,7 +203,6 @@ io.on('connection', (socket) => {
 
       if (target) {
           target.isDead = true; killer.lastKillTime = now;
-          // 🔧 DROP A CORPSE WHERE THEY DIED
           mapBodies.push({ x: target.x, y: target.y, name: target.name });
 
           while (killer.inventory.length < 3) { drawCard(killer); }
@@ -227,7 +229,6 @@ io.on('connection', (socket) => {
       if (!p || p.role !== 'Crewmate' || p.tasksLeft > 0 || p.inventory.length > 0) return;
       if (activeGlobalEffects['pod_lockdown']) return;
       
-      // 🔧 REJECT IF SOMEONE ELSE IS ALREADY CHANNELING
       if (activePodChanneler !== null && activePodChanneler !== socket.id) return;
       activePodChanneler = socket.id;
 
@@ -236,7 +237,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('cancel_pod_channel', () => {
-      if (activePodChanneler === socket.id) activePodChanneler = null; // 🔧 UNLOCK
+      if (activePodChanneler === socket.id) activePodChanneler = null; 
       const killerId = Object.keys(players).find(id => players[id].role === 'Killer');
       if (killerId) io.to(killerId).emit('killer_pod_alert', false);
   });
@@ -258,20 +259,48 @@ io.on('connection', (socket) => {
       evaluateWinCondition();
   });
 
+  // 🃏 UPDATED CARD PLAYING LOGIC
   socket.on('play_card', (cardIndex) => {
       const p = players[socket.id];
       if (!p || !gameInProgress || p.isDead) return;
       const now = Date.now();
       if (now - p.lastCardPlayTime < 10000) return; 
+      
       if (cardIndex >= 0 && cardIndex < p.inventory.length) {
           const cardId = p.inventory[cardIndex]; const cardData = CARD_DB[cardId];
           p.inventory.splice(cardIndex, 1); p.lastCardPlayTime = now;
-          activeGlobalEffects[cardId] = now + cardData.duration;
+          
+          if (cardId === 'task_wipe') {
+              // 1. Task Wipe: Instant, permanent effect for 50% of living crew
+              let aliveCrew = Object.values(players).filter(pl => pl.role === 'Crewmate' && !pl.isDead && !pl.isEscaped);
+              let shuffledCrew = aliveCrew.sort(() => 0.5 - Math.random());
+              let targets = shuffledCrew.slice(0, Math.max(1, Math.ceil(aliveCrew.length / 2)));
+              
+              targets.forEach(target => {
+                  let randomTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
+                  let taskClone = { ...randomTask, id: `task_${Math.random().toString(36).substr(2, 9)}` };
+                  target.tasksLeft++;
+                  io.to(target.id).emit('task_added', taskClone);
+              });
+              io.emit('system_message', 'WARNING: SYSTEM CORRUPTION - EXTRA TASKS ASSIGNED');
+              
+          } else if (cardId === 'adrenaline_surge') {
+              // 2. Adrenaline Surge: Targeted buff stored as an object instead of a timestamp
+              let allAlive = Object.keys(players).filter(id => !players[id].isDead && !players[id].isEscaped);
+              let shuffled = allAlive.sort(() => 0.5 - Math.random());
+              let targets = shuffled.slice(0, Math.ceil(allAlive.length / 2));
+              
+              activeGlobalEffects[cardId] = { expire: now + cardData.duration, targets: targets };
+              setTimeout(() => { if (activeGlobalEffects[cardId] && Date.now() >= activeGlobalEffects[cardId].expire) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
+              
+          } else {
+              // 3. Standard Duration Maps
+              activeGlobalEffects[cardId] = now + cardData.duration;
+              setTimeout(() => { if (activeGlobalEffects[cardId] && Date.now() >= activeGlobalEffects[cardId]) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
+          }
           
           socket.emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
           socket.emit('card_cooldown_started', 10000);
-
-          setTimeout(() => { if (activeGlobalEffects[cardId] && Date.now() >= activeGlobalEffects[cardId]) { delete activeGlobalEffects[cardId]; } }, cardData.duration);
       }
   });
 
