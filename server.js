@@ -21,7 +21,6 @@ let gameInProgress = false;
 let gameLoopInterval = null;
 let activePodChanneler = null; 
 
-const MAP_SIZE = 2400; // 🚪 RESCALED TO FIT THE NEW INDOOR STRUCTURE
 const TICK_RATE = 1000 / 20;
 
 const CARD_DB = {
@@ -40,67 +39,36 @@ const CARD_DB = {
 
 let activeGlobalEffects = {}; 
 
-// 🚪 NEW INDOOR SPACESHIP MAP STRUCTURE
+// ==========================================
+// 🗺️ PASTE YOUR CUSTOM MAP EXPORT HERE!
+// ==========================================
+const MAP_SIZE_W = 3000;
+const MAP_SIZE_H = 3000;
+
 const MAP_WALLS = [
-  // Outer hull bounds
-  { x: 0, y: 0, w: 2400, h: 40 }, { x: 0, y: 2360, w: 2400, h: 40 },
-  { x: 0, y: 0, w: 40, h: 2400 }, { x: 2360, y: 0, w: 40, h: 2400 },
+  { x: 0, y: 0, w: 3000, h: 40 },
+  { x: 0, y: 2960, w: 3000, h: 40 },
+  { x: 0, y: 0, w: 40, h: 3000 },
+  { x: 2960, y: 0, w: 40, h: 3000 },
+  { x: 1000, y: 1000, w: 400, h: 40 }
+];
 
-  // Center Admin Room (900-1500)
-  { x: 860, y: 860, w: 250, h: 40 }, { x: 1290, y: 860, w: 250, h: 40 }, // North wall w/ gap
-  { x: 860, y: 1500, w: 250, h: 40 }, { x: 1290, y: 1500, w: 250, h: 40 }, // South wall w/ gap
-  { x: 860, y: 860, w: 40, h: 680 }, { x: 1500, y: 860, w: 40, h: 680 }, // West & East solid walls
-
-  // NW Room - Medbay (200-600)
-  { x: 160, y: 160, w: 480, h: 40 }, { x: 160, y: 600, w: 480, h: 40 }, // North & South
-  { x: 160, y: 160, w: 40, h: 480 }, // West
-  { x: 600, y: 160, w: 40, h: 150 }, { x: 600, y: 450, w: 40, h: 190 }, // East w/ gap
-
-  // NE Room - Weapons (1800-2200)
-  { x: 1760, y: 160, w: 480, h: 40 }, { x: 1760, y: 600, w: 480, h: 40 }, // North & South
-  { x: 2200, y: 160, w: 40, h: 480 }, // East
-  { x: 1760, y: 160, w: 40, h: 150 }, { x: 1760, y: 450, w: 40, h: 190 }, // West w/ gap
-
-  // SW Room - Reactor (200-600, 1800-2200)
-  { x: 160, y: 2200, w: 480, h: 40 }, // South
-  { x: 160, y: 1760, w: 40, h: 480 }, { x: 600, y: 1760, w: 40, h: 480 }, // West & East
-  { x: 160, y: 1760, w: 150, h: 40 }, { x: 450, y: 1760, w: 190, h: 40 }, // North w/ gap
-
-  // SE Room - O2 (1800-2200)
-  { x: 1760, y: 2200, w: 480, h: 40 }, // South
-  { x: 1760, y: 1760, w: 40, h: 480 }, { x: 2200, y: 1760, w: 40, h: 480 }, // West & East
-  { x: 1760, y: 1760, w: 150, h: 40 }, { x: 2050, y: 1760, w: 190, h: 40 }, // North w/ gap
-
-  // Hallway Obstacles / Pillars to break Line of Sight
-  { x: 1100, y: 300, w: 200, h: 100 },
-  { x: 1100, y: 2000, w: 200, h: 100 },
-  { x: 300, y: 1100, w: 100, h: 200 },
-  { x: 2000, y: 1100, w: 100, h: 200 }
+const MAP_DIAGONALS = [
+  { x1: 1400, y1: 1000, x2: 1800, y2: 1400, thick: 40 }
 ];
 
 const MAP_DOORS = [
-  { id: 'd_center_n', x: 1110, y: 860, w: 180, h: 40, isOpen: false, lockedUntil: 0 },
-  { id: 'd_center_s', x: 1110, y: 1500, w: 180, h: 40, isOpen: false, lockedUntil: 0 },
-  { id: 'd_nw', x: 600, y: 310, w: 40, h: 140, isOpen: false, lockedUntil: 0 },
-  { id: 'd_ne', x: 1760, y: 310, w: 40, h: 140, isOpen: false, lockedUntil: 0 },
-  { id: 'd_sw', x: 310, y: 1760, w: 140, h: 40, isOpen: false, lockedUntil: 0 },
-  { id: 'd_se', x: 1910, y: 1760, w: 140, h: 40, isOpen: false, lockedUntil: 0 }
+  { id: 'd_1', x: 1000, y: 1040, w: 40, h: 140, isOpen: false, lockedUntil: 0 }
 ];
 
 const GAME_TASKS = [
-  { id: 't1', type: 'wiring', name: 'Admin Route', x: 1200, y: 1200 },
-  { id: 't2', type: 'download', name: 'Medbay Data', x: 400, y: 400 },
-  { id: 't3', type: 'keypad', name: 'Weapons Sec', x: 2000, y: 400 },
-  { id: 't4', type: 'primer', name: 'Nav Shields', x: 2100, y: 500 },
-  { id: 't5', type: 'wiring', name: 'Reactor Scrubber', x: 400, y: 2000 },
-  { id: 't6', type: 'download', name: 'Sync DB', x: 500, y: 1900 },
-  { id: 't7', type: 'keypad', name: 'O2 Lock', x: 2000, y: 2000 },
-  { id: 't8', type: 'primer', name: 'Comms Array', x: 1900, y: 2100 },
-  { id: 't9', type: 'simon_says', name: 'Core Memory', x: 1000, y: 1000 },
-  { id: 't10', type: 'slider_calibration', name: 'Thrusters', x: 1400, y: 1000 },
-  { id: 't11', type: 'asteroid_defense', name: 'Asteroids', x: 1400, y: 1400 },
-  { id: 't12', type: 'simon_says', name: 'Align Sensor', x: 1000, y: 1400 }
+  { id: 't1', type: 'wiring', name: 'Fix Power', x: 500, y: 500 }
 ];
+
+const ESCAPE_PODS = [
+  { id: 'pod_alpha', x: 200, y: 200, name: 'POD ALPHA' }
+];
+// ==========================================
 
 function drawCard(player) {
   if (player.inventory.length >= 3) return; 
@@ -155,19 +123,23 @@ function startGame() {
       let assignedTasks = [];
       if (players[id].role === 'Crewmate') {
           let shuffled = [...GAME_TASKS].sort(() => 0.5 - Math.random());
-          assignedTasks = shuffled.slice(0, 4);
+          assignedTasks = shuffled.slice(0, Math.min(4, GAME_TASKS.length));
           players[id].tasksLeft = assignedTasks.length;
       } else {
           drawCard(players[id]); drawCard(players[id]); drawCard(players[id]);
           players[id].lastKillTime = Date.now();
       }
       
-      // 🚪 EVERYONE SPAWNS IN THE CENTER ADMIN HUB
-      const startX = 1200 + (Math.random() * 80 - 40); 
-      const startY = 1200 + (Math.random() * 80 - 40);
+      const startX = (MAP_SIZE_W / 2) + (Math.random() * 80 - 40); 
+      const startY = (MAP_SIZE_H / 2) + (Math.random() * 80 - 40);
       players[id].x = startX; players[id].y = startY;
 
-      io.to(id).emit('game_start', { role: players[id].role, playersInGame: playerIds.length, startX: startX, startY: startY, tasks: assignedTasks, walls: MAP_WALLS });
+      // 🔧 DIAGONALS ADDED TO THE PAYLOAD
+      io.to(id).emit('game_start', { 
+          role: players[id].role, playersInGame: playerIds.length, 
+          startX: startX, startY: startY, tasks: assignedTasks, 
+          walls: MAP_WALLS, diagonals: MAP_DIAGONALS 
+      });
       io.to(id).emit('inventory_update', players[id].inventory.map(c => CARD_DB[c]));
 
       if (players[id].role === 'Killer') {
@@ -181,7 +153,6 @@ function startGame() {
 function broadcastState() {
   let now = Date.now();
   
-  // 🚪 SERVER CALCULATES PROXIMITY DOORS
   MAP_DOORS.forEach(d => {
       d.isLocked = (now < d.lockedUntil);
       if (d.isLocked) {
@@ -189,7 +160,7 @@ function broadcastState() {
       } else {
           let playerNear = Object.values(players).some(p => {
               if (p.isDead || p.isEscaped) return false;
-              let pad = 150; // Door motion sensor radius
+              let pad = 150; 
               return (p.x > d.x - pad && p.x < d.x + d.w + pad && p.y > d.y - pad && p.y < d.y + d.h + pad);
           });
           d.isOpen = playerNear;
@@ -224,7 +195,6 @@ function evaluateWinCondition() {
     }
 }
 
-// 🚪 SERVER STILL CALCULATES BASIC HITBOX TO PREVENT HACKING
 function circleRectCollide(cx, cy, cr, rx, ry, rw, rh) {
     let testX = cx; let testY = cy;
     if (cx < rx) testX = rx; else if (cx > rx + rw) testX = rx + rw;
@@ -233,9 +203,23 @@ function circleRectCollide(cx, cy, cr, rx, ry, rw, rh) {
     return (Math.sqrt((distX*distX) + (distY*distY)) <= cr);
 }
 
+// 🔧 ADDED POINT-TO-LINE COLLISION FOR DIAGONAL WALLS
+function circleLineCollide(cx, cy, cr, x1, y1, x2, y2, thick) {
+    let l2 = (x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1);
+    if (l2 === 0) return Math.hypot(cx - x1, cy - y1) <= cr + thick/2;
+    let t = ((cx - x1)*(x2 - x1) + (cy - y1)*(y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    let projX = x1 + t * (x2 - x1);
+    let projY = y1 + t * (y2 - y1);
+    return Math.hypot(cx - projX, cy - projY) <= cr + thick/2;
+}
+
 function checkWallCollision(x, y, radius = 15) {
   for (let wall of MAP_WALLS) {
       if (circleRectCollide(x, y, radius, wall.x, wall.y, wall.w, wall.h)) return true;
+  }
+  for (let diag of MAP_DIAGONALS) {
+      if (circleLineCollide(x, y, radius, diag.x1, diag.y1, diag.x2, diag.y2, diag.thick)) return true;
   }
   for (let door of MAP_DOORS) {
       if (!door.isOpen) {
