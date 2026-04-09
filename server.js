@@ -21,7 +21,7 @@ let gameInProgress = false;
 let gameLoopInterval = null;
 let activePodChanneler = null; 
 
-const MAP_SIZE = 2000;
+const MAP_SIZE = 3000; // 🚪 INCREASED MAP SIZE
 const TICK_RATE = 1000 / 20;
 
 const CARD_DB = {
@@ -29,6 +29,7 @@ const CARD_DB = {
   comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
   flashbang: { id: "flashbang", name: "Flashbang", tier: 1, duration: 2000, desc: "Blinds all players, vision slowly returns." },
   adrenaline_surge: { id: "adrenaline_surge", name: "Adrenaline Surge", tier: 1, duration: 5000, desc: "30% speed boost to 50% of players." },
+  airlock_seal: { id: "airlock_seal", name: "Airlock Seal", tier: 1, duration: 10000, desc: "Slams and locks all nearby doors." }, // 🚪 NEW CARD
   
   gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
   grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
@@ -39,33 +40,57 @@ const CARD_DB = {
 
 let activeGlobalEffects = {}; 
 
+// 🚪 MASSIVE ASYMMETRICAL MAP
 const MAP_WALLS = [
-  { x: 0, y: 0, w: 2000, h: 40 }, { x: 0, y: 1960, w: 2000, h: 40 }, { x: 0, y: 0, w: 40, h: 2000 }, { x: 1960, y: 0, w: 40, h: 2000 },
-  { x: 800, y: 800, w: 150, h: 40 }, { x: 1050, y: 800, w: 150, h: 40 }, { x: 800, y: 1160, w: 150, h: 40 }, { x: 1050, y: 1160, w: 150, h: 40 },
-  { x: 800, y: 800, w: 40, h: 150 }, { x: 800, y: 1050, w: 40, h: 150 }, { x: 1160, y: 800, w: 40, h: 150 }, { x: 1160, y: 1050, w: 40, h: 150 },
-  { x: 200, y: 200, w: 400, h: 40 }, { x: 200, y: 600, w: 150, h: 40 }, { x: 450, y: 600, w: 150, h: 40 }, { x: 200, y: 200, w: 40, h: 400 },  
-  { x: 560, y: 200, w: 40, h: 150 }, { x: 560, y: 450, w: 40, h: 150 }, { x: 1400, y: 200, w: 400, h: 40 }, { x: 1400, y: 600, w: 150, h: 40 }, 
-  { x: 1650, y: 600, w: 150, h: 40 }, { x: 1760, y: 200, w: 40, h: 400 }, { x: 1400, y: 200, w: 40, h: 150 }, { x: 1400, y: 450, w: 40, h: 150 }, 
-  { x: 200, y: 1760, w: 400, h: 40 }, { x: 200, y: 1400, w: 150, h: 40 }, { x: 450, y: 1400, w: 150, h: 40 }, { x: 200, y: 1400, w: 40, h: 400 }, 
-  { x: 560, y: 1400, w: 40, h: 150 }, { x: 560, y: 1650, w: 40, h: 150 }, { x: 1400, y: 1760, w: 400, h: 40 }, { x: 1400, y: 1400, w: 150, h: 40 },
-  { x: 1650, y: 1400, w: 150, h: 40 }, { x: 1760, y: 1400, w: 40, h: 400 }, { x: 1400, y: 1400, w: 40, h: 150 }, { x: 1400, y: 1650, w: 40, h: 150 },
-  { x: 600, y: 600, w: 100, h: 100 }, { x: 1300, y: 600, w: 100, h: 100 }, { x: 600, y: 1300, w: 100, h: 100 }, { x: 1300, y: 1300, w: 100, h: 100 }
+  // Outer Bounds
+  { x: 0, y: 0, w: 3000, h: 40 }, { x: 0, y: 2960, w: 3000, h: 40 },
+  { x: 0, y: 0, w: 40, h: 3000 }, { x: 2960, y: 0, w: 40, h: 3000 },
+
+  // Center Admin Hub (800x800) with Door Gaps
+  { x: 1100, y: 1100, w: 300, h: 40 }, { x: 1600, y: 1100, w: 300, h: 40 }, // Top Wall
+  { x: 1100, y: 1860, w: 300, h: 40 }, { x: 1600, y: 1860, w: 300, h: 40 }, // Bottom Wall
+  { x: 1100, y: 1140, w: 40, h: 260 }, { x: 1100, y: 1600, w: 40, h: 260 }, // Left Wall
+  { x: 1860, y: 1140, w: 40, h: 260 }, { x: 1860, y: 1600, w: 40, h: 260 }, // Right Wall
+
+  // Corner L-Shapes
+  { x: 400, y: 400, w: 300, h: 40 }, { x: 400, y: 440, w: 40, h: 260 }, // Top Left
+  { x: 2300, y: 400, w: 300, h: 40 }, { x: 2560, y: 440, w: 40, h: 260 }, // Top Right
+  { x: 400, y: 2560, w: 300, h: 40 }, { x: 400, y: 2300, w: 40, h: 260 }, // Bottom Left
+  { x: 2300, y: 2560, w: 300, h: 40 }, { x: 2560, y: 2300, w: 40, h: 260 }, // Bottom Right
+
+  // LoS Blocking Pillars
+  { x: 800, y: 800, w: 100, h: 100 }, { x: 2100, y: 800, w: 100, h: 100 },
+  { x: 800, y: 2100, w: 100, h: 100 }, { x: 2100, y: 2100, w: 100, h: 100 },
+
+  // Asymmetric Hallway Dividers
+  { x: 800, y: 40, w: 40, h: 400 }, // North-West divider
+  { x: 400, y: 850, w: 40, h: 250 }, // Top-Left continuation
+  { x: 2160, y: 1480, w: 240, h: 40 }, { x: 2550, y: 1480, w: 410, h: 40 } // Broken East Corridor
 ];
 
-// 🔧 ADDED NEW MINIGAMES TO THE TASK POOL
+// 🚪 DYNAMIC DOORS
+const MAP_DOORS = [
+  { id: 'd_north', x: 1400, y: 1100, w: 200, h: 40, isOpen: false, lockedUntil: 0 },
+  { id: 'd_south', x: 1400, y: 1860, w: 200, h: 40, isOpen: false, lockedUntil: 0 },
+  { id: 'd_west', x: 1100, y: 1400, w: 40, h: 200, isOpen: false, lockedUntil: 0 },
+  { id: 'd_east', x: 1860, y: 1400, w: 40, h: 200, isOpen: false, lockedUntil: 0 },
+  { id: 'd_nw', x: 400, y: 700, w: 40, h: 150, isOpen: false, lockedUntil: 0 },
+  { id: 'd_e_hall', x: 2400, y: 1480, w: 150, h: 40, isOpen: false, lockedUntil: 0 }
+];
+
 const GAME_TASKS = [
-  { id: 'task_1', type: 'wiring', name: 'Fix North Power', x: 1000, y: 300 },
-  { id: 'task_2', type: 'download', name: 'Download Data', x: 1600, y: 400 },
-  { id: 'task_3', type: 'keypad', name: 'Override Sec', x: 1600, y: 1600 },
-  { id: 'task_4', type: 'primer', name: 'Prime Shields', x: 400, y: 1600 },
-  { id: 'task_5', type: 'wiring', name: 'Fix South O2', x: 1000, y: 1700 },
-  { id: 'task_6', type: 'download', name: 'Sync DB', x: 400, y: 400 },
-  { id: 'task_7', type: 'keypad', name: 'Unlock Medbay', x: 300, y: 1000 },
-  { id: 'task_8', type: 'primer', name: 'Reboot Reactor', x: 1700, y: 1000 },
-  { id: 'task_9', type: 'simon_says', name: 'Reboot Core Memory', x: 200, y: 800 },
-  { id: 'task_10', type: 'slider_calibration', name: 'Calibrate Thrusters', x: 1800, y: 800 },
-  { id: 'task_11', type: 'asteroid_defense', name: 'Clear Asteroids', x: 1000, y: 1000 },
-  { id: 'task_12', type: 'simon_says', name: 'Align Comm Array', x: 500, y: 200 }
+  { id: 't1', type: 'wiring', name: 'Admin Route', x: 1500, y: 1500 },
+  { id: 't2', type: 'download', name: 'Medbay Data', x: 500, y: 500 },
+  { id: 't3', type: 'keypad', name: 'Reactor Sec', x: 2500, y: 2500 },
+  { id: 't4', type: 'primer', name: 'Nav Shields', x: 500, y: 2500 },
+  { id: 't5', type: 'wiring', name: 'O2 Scrubbers', x: 2500, y: 500 },
+  { id: 't6', type: 'download', name: 'Sync DB', x: 1200, y: 400 },
+  { id: 't7', type: 'keypad', name: 'Armory Lock', x: 400, y: 1500 },
+  { id: 't8', type: 'primer', name: 'Comms Array', x: 2600, y: 1500 },
+  { id: 't9', type: 'simon_says', name: 'Core Memory', x: 1500, y: 1800 },
+  { id: 't10', type: 'slider_calibration', name: 'Thrusters', x: 1500, y: 1200 },
+  { id: 't11', type: 'asteroid_defense', name: 'Asteroids', x: 2000, y: 500 },
+  { id: 't12', type: 'simon_says', name: 'Align Sensor', x: 1500, y: 2800 }
 ];
 
 function drawCard(player) {
@@ -83,6 +108,9 @@ function resetGame() {
   mapBodies = [];
   if (gameLoopInterval) { clearInterval(gameLoopInterval); gameLoopInterval = null; }
   activeGlobalEffects = {};
+  
+  MAP_DOORS.forEach(d => { d.isOpen = false; d.lockedUntil = 0; });
+
   Object.values(players).forEach(p => {
       p.isReady = false; p.role = null; p.inventory = []; p.isDead = false; p.isEscaped = false; p.lastKillTime = 0; p.tasksLeft = 0;
   });
@@ -125,7 +153,8 @@ function startGame() {
           players[id].lastKillTime = Date.now();
       }
       
-      const startX = 1000 + (Math.random() * 40 - 20); const startY = 1000 + (Math.random() * 40 - 20);
+      // Spawn players near the Admin Center
+      const startX = 1500 + (Math.random() * 80 - 40); const startY = 1500 + (Math.random() * 80 - 40);
       players[id].x = startX; players[id].y = startY;
 
       io.to(id).emit('game_start', { role: players[id].role, playersInGame: playerIds.length, startX: startX, startY: startY, tasks: assignedTasks, walls: MAP_WALLS });
@@ -140,10 +169,31 @@ function startGame() {
 }
 
 function broadcastState() {
+  let now = Date.now();
+  
+  // 🚪 CALCULATE DOOR STATES BASED ON PROXIMITY
+  MAP_DOORS.forEach(d => {
+      d.isLocked = (now < d.lockedUntil);
+      if (d.isLocked) {
+          d.isOpen = false;
+      } else {
+          let playerNear = Object.values(players).some(p => {
+              if (p.isDead || p.isEscaped) return false;
+              let pad = 150; // Proximity sensor range
+              return (p.x > d.x - pad && p.x < d.x + d.w + pad && p.y > d.y - pad && p.y < d.y + d.h + pad);
+          });
+          d.isOpen = playerNear;
+      }
+  });
+
   const sanitizedPlayers = Object.values(players).map(p => ({
       id: p.id, name: p.name, x: p.x, y: p.y, isDead: p.isDead, isEscaped: p.isEscaped
   }));
-  io.emit('game_state_update', { players: sanitizedPlayers, effects: activeGlobalEffects, bodies: mapBodies, activePodLock: activePodChanneler !== null });
+  
+  io.emit('game_state_update', { 
+      players: sanitizedPlayers, effects: activeGlobalEffects, bodies: mapBodies, 
+      activePodLock: activePodChanneler !== null, doors: MAP_DOORS 
+  });
 }
 
 function evaluateWinCondition() {
@@ -164,6 +214,27 @@ function evaluateWinCondition() {
     }
 }
 
+// 🚪 SERVER-SIDE WALL AND DOOR COLLISION
+function checkWallCollision(x, y, radius = 15) {
+  for (let wall of MAP_WALLS) {
+      let testX = x; let testY = y;
+      if (x < wall.x) testX = wall.x; else if (x > wall.x + wall.w) testX = wall.x + wall.w; 
+      if (y < wall.y) testY = wall.y; else if (y > wall.y + wall.h) testY = wall.y + wall.h; 
+      let distX = x - testX; let distY = y - testY;
+      if (Math.sqrt((distX*distX) + (distY*distY)) <= radius) return true;
+  }
+  for (let door of MAP_DOORS) {
+      if (!door.isOpen) {
+          let testX = x; let testY = y;
+          if (x < door.x) testX = door.x; else if (x > door.x + door.w) testX = door.x + door.w; 
+          if (y < door.y) testY = door.y; else if (y > door.y + door.h) testY = door.y + door.h; 
+          let distX = x - testX; let distY = y - testY;
+          if (Math.sqrt((distX*distX) + (distY*distY)) <= radius) return true;
+      }
+  }
+  return false;
+}
+
 io.on('connection', (socket) => {
   socket.on('join_lobby', (playerName) => {
       if (gameInProgress) { socket.emit('countdown_update', 'GAME IN PROGRESS.'); return; }
@@ -182,7 +253,8 @@ io.on('connection', (socket) => {
       
       if (p.isDead) { p.x = data.x; p.y = data.y; return; }
       
-      if (Math.sqrt(dx * dx + dy * dy) > 150) { socket.emit('server_correction', { x: p.x, y: p.y });
+      if (Math.sqrt(dx * dx + dy * dy) > 150 || checkWallCollision(data.x, data.y)) { 
+          socket.emit('server_correction', { x: p.x, y: p.y });
       } else { p.x = data.x; p.y = data.y; }
   });
 
@@ -285,6 +357,15 @@ io.on('connection', (socket) => {
               });
               io.emit('system_message', 'WARNING: CRITICAL TASK WIPE DETECTED');
           } 
+          // 🚪 AIRLOCK SEAL LOGIC
+          else if (cardId === 'airlock_seal') {
+              MAP_DOORS.forEach(d => {
+                  let cx = d.x + d.w/2; let cy = d.y + d.h/2;
+                  if (Math.hypot(p.x - cx, p.y - cy) < 1000) { d.lockedUntil = now + 10000; }
+              });
+              activeGlobalEffects[cardId] = now + cardData.duration;
+              io.emit('system_message', 'WARNING: LOCAL AIRLOCKS SEALED');
+          }
           else {
               activeGlobalEffects[cardId] = now + cardData.duration;
           }
