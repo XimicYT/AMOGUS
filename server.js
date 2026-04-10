@@ -44,6 +44,8 @@ let activeGlobalEffects = {};
 // ==========================================
 // COPY AND PASTE THIS TO THE AI
 
+// COPY AND PASTE THIS TO THE AI
+
 const MAP_SIZE_W = 5000;
 const MAP_SIZE_H = 3000;
 
@@ -241,7 +243,8 @@ const MAP_WALLS = [
   { x: 4200, y: 1080, w: 480, h: 20 },
   { x: 3550, y: 700, w: 200, h: 410 },
   { x: 3600, y: 550, w: 150, h: 150 },
-  { x: 3750, y: 800, w: 100, h: 250 }
+  { x: 3750, y: 800, w: 100, h: 250 },
+  { x: 3250, y: 2700, w: 50, h: 50 }
 ];
 
 const MAP_DIAGONALS = [
