@@ -460,12 +460,31 @@ function circleLineCollide(cx, cy, cr, x1, y1, x2, y2, thick) {
 }
 
 function checkWallCollision(x, y, radius = 15) {
-  for (let wall of MAP_WALLS) {
+  // PERFORMANCE FIX: Only check walls & diagonals within 150 pixels of the player
+  const cullDist = 150; 
+  
+  const nearbyWalls = MAP_WALLS.filter(w => 
+      w.x < x + cullDist && 
+      w.x + w.w > x - cullDist && 
+      w.y < y + cullDist && 
+      w.y + w.h > y - cullDist
+  );
+
+  for (let wall of nearbyWalls) {
       if (circleRectCollide(x, y, radius, wall.x, wall.y, wall.w, wall.h)) return true;
   }
-  for (let diag of MAP_DIAGONALS) {
+
+  const nearbyDiagonals = MAP_DIAGONALS.filter(d => 
+      Math.min(d.x1, d.x2) < x + cullDist && 
+      Math.max(d.x1, d.x2) > x - cullDist && 
+      Math.min(d.y1, d.y2) < y + cullDist && 
+      Math.max(d.y1, d.y2) > y - cullDist
+  );
+
+  for (let diag of nearbyDiagonals) {
       if (circleLineCollide(x, y, radius, diag.x1, diag.y1, diag.x2, diag.y2, diag.thick)) return true;
   }
+
   for (let door of MAP_DOORS) {
       if (!door.isOpen) {
           if (circleRectCollide(x, y, radius, door.x, door.y, door.w, door.h)) return true;
