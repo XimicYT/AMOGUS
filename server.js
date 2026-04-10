@@ -39,13 +39,6 @@ const CARD_DB = {
 
 let activeGlobalEffects = {}; 
 
-// ==========================================
-// 🗺️ PASTE YOUR CUSTOM MAP EXPORT HERE!
-// ==========================================
-// COPY AND PASTE THIS TO THE AI
-
-// COPY AND PASTE THIS TO THE AI
-
 const MAP_SIZE_W = 5000;
 const MAP_SIZE_H = 3000;
 
@@ -316,6 +309,14 @@ const ESCAPE_PODS = [
   { id: 'pod_1775823942745', x: 70, y: 1480, name: 'POD OMEGA' }
 ];
 
+const SPAWN_POINTS = [
+  { x: 140, y: 970 },
+  { x: 1740, y: 2860 },
+  { x: 4900, y: 2280 },
+  { x: 2590, y: 1800 },
+  { x: 1730, y: 150 }
+];
+
 // ==========================================
 
 function drawCard(player) {
@@ -358,44 +359,61 @@ function checkGameStart() {
 }
 
 function startGame() {
-  gameInProgress = true;
-  const playerIds = Object.keys(players);
-  const killerIndex = Math.floor(Math.random() * playerIds.length);
-  const killerId = playerIds[killerIndex];
+    gameInProgress = true;
+    const playerIds = Object.keys(players);
+    
+    // 1. Shuffle player IDs so the same person isn't always at Spawn #1
+    const shuffledIds = [...playerIds].sort(() => Math.random() - 0.5);
+    
+    // 2. Pick a random Killer from the shuffled list
+    const killerId = shuffledIds[Math.floor(Math.random() * shuffledIds.length)];
 
-  playerIds.forEach(id => {
-      players[id].role = (id === killerId) ? 'Killer' : 'Crewmate';
-      players[id].inventory = []; players[id].lastCardPlayTime = 0;
-      players[id].isDead = false; players[id].isEscaped = false; 
-      
-      let assignedTasks = [];
-      if (players[id].role === 'Crewmate') {
-          let shuffled = [...GAME_TASKS].sort(() => 0.5 - Math.random());
-          assignedTasks = shuffled.slice(0, Math.min(4, GAME_TASKS.length));
-          players[id].tasksLeft = assignedTasks.length;
-      } else {
-          drawCard(players[id]); drawCard(players[id]); drawCard(players[id]);
-          players[id].lastKillTime = Date.now();
-      }
-      
-      const startX = (MAP_SIZE_W / 2) + (Math.random() * 80 - 40); 
-      const startY = (MAP_SIZE_H / 2) + (Math.random() * 80 - 40);
-      players[id].x = startX; players[id].y = startY;
+    shuffledIds.forEach((id, index) => {
+        const p = players[id];
+        p.role = (id === killerId) ? 'Killer' : 'Crewmate';
+        p.inventory = []; 
+        p.lastCardPlayTime = 0;
+        p.isDead = false; 
+        p.isEscaped = false; 
+        
+        // --- SPAWN LOGIC ---
+        const spawn = SPAWN_POINTS[index % SPAWN_POINTS.length];
+        
+        // Add a ±20px random jitter so players aren't perfectly stacked on top of each other
+        p.x = spawn.x + (Math.random() * 40 - 20);
+        p.y = spawn.y + (Math.random() * 40 - 20);
+        // -------------------
 
-      // 🔧 DIAGONALS ADDED TO THE PAYLOAD
-      io.to(id).emit('game_start', { 
-          role: players[id].role, playersInGame: playerIds.length, 
-          startX: startX, startY: startY, tasks: assignedTasks, 
-          walls: MAP_WALLS, diagonals: MAP_DIAGONALS 
-      });
-      io.to(id).emit('inventory_update', players[id].inventory.map(c => CARD_DB[c]));
+        let assignedTasks = [];
+        if (p.role === 'Crewmate') {
+            let shuffledTasks = [...GAME_TASKS].sort(() => 0.5 - Math.random());
+            assignedTasks = shuffledTasks.slice(0, Math.min(4, GAME_TASKS.length));
+            p.tasksLeft = assignedTasks.length;
+        } else {
+            // Give the killer their starting hand
+            drawCard(p); drawCard(p); drawCard(p);
+            p.lastKillTime = Date.now();
+        }
+        
+        // 3. Send the starting data to the specific player
+        io.to(id).emit('game_start', { 
+            role: p.role, 
+            playersInGame: playerIds.length, 
+            startX: p.x, 
+            startY: p.y, 
+            tasks: assignedTasks, 
+            walls: MAP_WALLS, 
+            diagonals: MAP_DIAGONALS 
+        });
 
-      if (players[id].role === 'Killer') {
-          io.to(id).emit('kill_cooldown_started', 20000);
-      }
-  });
+        io.to(id).emit('inventory_update', p.inventory.map(c => CARD_DB[c]));
 
-  gameLoopInterval = setInterval(broadcastState, TICK_RATE);
+        if (p.role === 'Killer') {
+            io.to(id).emit('kill_cooldown_started', 20000);
+        }
+    });
+
+    gameLoopInterval = setInterval(broadcastState, TICK_RATE);
 }
 
 function broadcastState() {
@@ -451,7 +469,6 @@ function circleRectCollide(cx, cy, cr, rx, ry, rw, rh) {
     return (Math.sqrt((distX*distX) + (distY*distY)) <= cr);
 }
 
-// 🔧 ADDED POINT-TO-LINE COLLISION FOR DIAGONAL WALLS
 function circleLineCollide(cx, cy, cr, x1, y1, x2, y2, thick) {
     let l2 = (x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1);
     if (l2 === 0) return Math.hypot(cx - x1, cy - y1) <= cr + thick/2;
