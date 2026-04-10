@@ -237,7 +237,12 @@ const MAP_WALLS = [
   { x: 3550, y: 700, w: 200, h: 410 },
   { x: 3600, y: 550, w: 150, h: 150 },
   { x: 3750, y: 800, w: 100, h: 250 },
-  { x: 3250, y: 2700, w: 50, h: 50 }
+  { x: 3250, y: 2700, w: 50, h: 50 },
+  // --- Outer Map Borders ---
+  { x: 0, y: -50, w: 5000, h: 50 },    // Top border
+  { x: 0, y: 3000, w: 5000, h: 50 },   // Bottom border
+  { x: -50, y: 0, w: 50, h: 3000 },    // Left border
+  { x: 5000, y: 0, w: 50, h: 3000 }    // Right border
 ];
 
 const MAP_DIAGONALS = [
