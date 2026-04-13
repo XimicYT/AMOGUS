@@ -27,17 +27,43 @@ let activePodChanneler = null;
 const TICK_RATE = 1000 / 20;
 
 const CARD_DB = {
-  short_circuit: { id: "short_circuit", name: "Short Circuit", tier: 1, duration: 10000, desc: "Reduce map vision heavily." },
-  comms_static: { id: "comms_static", name: "Comms Static", tier: 1, duration: 15000, desc: "Scramble UI & Task Tracking." },
-  flashbang: { id: "flashbang", name: "Flashbang", tier: 1, duration: 2000, desc: "Blinds all players, vision slowly returns." },
-  adrenaline_surge: { id: "adrenaline_surge", name: "Adrenaline Surge", tier: 1, duration: 5000, desc: "30% speed boost to 50% of players." },
-  airlock_seal: { id: "airlock_seal", name: "Airlock Seal", tier: 1, duration: 10000, desc: "Slams and locks all nearby doors." }, 
+  // ==========================================
+  // TIER 1: Frequent disruptions (Sensory & Movement Chaos)
+  // ==========================================
+  power_flicker: { id: "power_flicker", name: "Power Flicker", tier: 1, duration: 8000, desc: "Map vision rapidly pulses between pitch black and normal." },
   
-  gravity_spike: { id: "gravity_spike", name: "Gravity Spike", tier: 2, duration: 15000, desc: "Reduces movement speed by 50%." },
-  grid_overload: { id: "grid_overload", name: "Grid Overload", tier: 2, duration: 15000, desc: "Lock all task interactions map-wide." },
-  pod_lockdown: { id: "pod_lockdown", name: "Pod Lockdown", tier: 2, duration: 20000, desc: "Disables Escape Pods for 20 seconds."},
-  neural_scramble: { id: "neural_scramble", name: "Neural Scramble", tier: 2, duration: 5000, desc: "Inverts movement keys for all players." },
-  task_wipe: { id: "task_wipe", name: "Task Wipe", tier: 2, duration: 0, desc: "Adds 1 task to 50% of Crewmates." }
+  identity_theft: { id: "identity_theft", name: "Identity Theft", tier: 1, duration: 12000, desc: "Hides all player names and turns everyone into identical grey blobs." },
+  
+  door_roulette: { id: "door_roulette", name: "Door Roulette", tier: 1, duration: 10000, desc: "Random doors rapidly slam shut and pop open across the entire map." },
+  
+  zero_friction: { id: "zero_friction", name: "Zero-G Thrusters", tier: 1, duration: 8000, desc: "Removes floor friction. Everyone slides uncontrollably like they are on ice." },
+
+  tunnel_vision: { id: "tunnel_vision", name: "Tunnel Vision", tier: 1, duration: 10000, desc: "Vision radius shrinks to just 40 pixels, but everyone gets a slight speed boost." },
+
+  color_drain: { id: "color_drain", name: "Color Drain", tier: 1, duration: 15000, desc: "The entire map and all players render in pure grayscale." },
+
+  hyper_sprint: { id: "hyper_sprint", name: "Hyper Sprint", tier: 1, duration: 4000, desc: "Everyone moves at 300% speed. Wall-slamming guaranteed." },
+
+  sonar_ping: { id: "sonar_ping", name: "Sonar System", tier: 1, duration: 12000, desc: "Pitch black map. Vision only returns for a split-second flash every 3 seconds." },
+
+  // ==========================================
+  // TIER 2: Game-altering shifts (Highly disorienting)
+  // ==========================================
+  neural_scramble: { id: "neural_scramble", name: "Neural Scramble", tier: 2, duration: 8000, desc: "Inverts movement keys (W=S, A=D) for all players." },
+  
+  spatial_shift: { id: "spatial_shift", name: "Spatial Shift", tier: 2, duration: 0, desc: "Instantly teleports every player to a random, scattered coordinate." },
+  
+  task_shuffle: { id: "task_shuffle", name: "Task Shuffle", tier: 2, duration: 0, desc: "Randomly relocates everyone's uncompleted tasks to new spots." },
+  
+  blind_panic: { id: "blind_panic", name: "Blind Panic", tier: 2, duration: 8000, desc: "Grants everyone +50% speed, but drops vision to almost zero." },
+
+  time_warp: { id: "time_warp", name: "Time Warp", tier: 2, duration: 10000, desc: "Physics engine runs at double speed. Everything is entirely too fast." },
+
+  drunk_walk: { id: "drunk_walk", name: "Intoxication Protocol", tier: 2, duration: 10000, desc: "Applies a random sine-wave sway to all movement. Walking straight is impossible." },
+
+  stutter_step: { id: "stutter_step", name: "Stutter Step", tier: 2, duration: 12000, desc: "Server lag simulation. Every 2 seconds, all players freeze in place for 0.5 seconds." },
+
+  kinetic_vision: { id: "kinetic_vision", name: "Kinetic Vision", tier: 2, duration: 15000, desc: "Standing still makes you completely blind. You only get vision while moving." }
 };
 
 let activeGlobalEffects = {}; 
@@ -613,26 +639,50 @@ io.on('connection', (socket) => {
               const affected = activeIds.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(activeIds.length / 2));
               activeGlobalEffects[cardId] = { expires: now + cardData.duration, affected: affected };
           } 
-          else if (cardId === 'task_wipe') {
-              const crewIds = Object.keys(players).filter(id => players[id].role === 'Crewmate' && !players[id].isDead && !players[id].isEscaped);
-              const affected = crewIds.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(crewIds.length / 2));
-              affected.forEach(id => {
-                  players[id].tasksLeft++;
-                  const baseTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
-                  const taskInstance = { ...baseTask, id: 'task_' + Math.floor(Math.random()*100000) };
-                  io.to(id).emit('add_new_task', taskInstance);
+          // ==========================================
+          // --- NEW SERVER-SIDE CARD LOGIC ---
+          // ==========================================
+          else if (cardId === 'spatial_shift') {
+              // Teleport everyone to random spots within map bounds
+              Object.values(players).forEach(p => {
+                  if (!p.isDead && !p.isEscaped) {
+                      p.x = 200 + Math.random() * (MAP_SIZE_W - 400);
+                      p.y = 200 + Math.random() * (MAP_SIZE_H - 400);
+                  }
               });
-              io.emit('system_message', 'WARNING: CRITICAL TASK WIPE DETECTED');
-          } 
-          else if (cardId === 'airlock_seal') {
-              MAP_DOORS.forEach(d => {
-                  let cx = d.x + d.w/2; let cy = d.y + d.h/2;
-                  if (Math.hypot(p.x - cx, p.y - cy) < 1000) { d.lockedUntil = now + 10000; }
-              });
-              activeGlobalEffects[cardId] = now + cardData.duration;
-              io.emit('system_message', 'WARNING: LOCAL AIRLOCKS SEALED');
+              io.emit('system_message', 'ANOMALY: SPATIAL SHIFT DETECTED');
           }
+          else if (cardId === 'task_shuffle') {
+              const crewIds = Object.keys(players).filter(id => players[id].role === 'Crewmate' && !players[id].isDead && !players[id].isEscaped);
+              crewIds.forEach(id => {
+                  // Tell client to clear their current task array
+                  io.to(id).emit('wipe_tasks'); 
+                  
+                  // Issue brand new tasks based on how many they had left
+                  for(let i = 0; i < players[id].tasksLeft; i++) {
+                      const baseTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
+                      const taskInstance = { ...baseTask, id: 'task_' + Math.floor(Math.random()*100000) };
+                      io.to(id).emit('add_new_task', taskInstance);
+                  }
+              });
+              io.emit('system_message', 'WARNING: TASK MANIFEST CORRUPTED');
+          }
+          else if (cardId === 'door_roulette') {
+              activeGlobalEffects[cardId] = now + cardData.duration;
+              io.emit('system_message', 'WARNING: DOOR CONTROL FAILURE');
+              
+              // Server rapid-fires random door states while the effect lasts
+              const rouletteInt = setInterval(() => {
+                  if (!activeGlobalEffects[cardId]) { 
+                      clearInterval(rouletteInt); 
+                      return; 
+                  }
+                  MAP_DOORS.forEach(d => d.isOpen = Math.random() > 0.5);
+              }, 600); // Shuffles every 0.6 seconds
+          }
+          // ==========================================
           else {
+              // This catches ALL other cards (zero_friction, color_drain, etc.)
               activeGlobalEffects[cardId] = now + cardData.duration;
           }
           
