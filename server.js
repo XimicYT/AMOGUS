@@ -13,7 +13,7 @@ const io = new Server(server, {
   path: "/v1/sys/fetch", // Must match the client
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['polling'], // Force the server to only use polling
-  pingInterval: 30000,    // Slowed way down (30 seconds) to reduce "heartbeat" noise
+  pingInterval: 3000,    // Slowed way down (30 seconds) to reduce "heartbeat" noise
   pingTimeout: 15000,
   allowUpgrades: false    // Security measure to keep it on standard HTTP
 });
@@ -457,7 +457,8 @@ function broadcastState() {
       d.isLocked = (now < d.lockedUntil);
       if (d.isLocked) {
           d.isOpen = false;
-      } else {
+      } else if (!activeGlobalEffects['door_roulette']) { 
+          // ONLY check proximity if door roulette is NOT active
           let playerNear = Object.values(players).some(p => {
               if (p.isDead || p.isEscaped) return false;
               let pad = 150; 
@@ -465,6 +466,7 @@ function broadcastState() {
           });
           d.isOpen = playerNear;
       }
+      // If roulette is active, it just skips this block and leaves the door state alone!
   });
 
   const sanitizedPlayers = Object.values(players).map(p => ({
@@ -634,20 +636,23 @@ io.on('connection', (socket) => {
           const cardId = p.inventory[cardIndex]; const cardData = CARD_DB[cardId];
           p.inventory.splice(cardIndex, 1); p.lastCardPlayTime = now;
           
-          if (cardId === 'adrenaline_surge') {
-              const activeIds = Object.keys(players).filter(id => !players[id].isDead);
-              const affected = activeIds.sort(() => 0.5 - Math.random()).slice(0, Math.ceil(activeIds.length / 2));
-              activeGlobalEffects[cardId] = { expires: now + cardData.duration, affected: affected };
-          } 
           // ==========================================
           // --- NEW SERVER-SIDE CARD LOGIC ---
           // ==========================================
-          else if (cardId === 'spatial_shift') {
-              // Teleport everyone to random spots within map bounds
+          if (cardId === 'spatial_shift') {
               Object.values(players).forEach(p => {
                   if (!p.isDead && !p.isEscaped) {
-                      p.x = 200 + Math.random() * (MAP_SIZE_W - 400);
-                      p.y = 200 + Math.random() * (MAP_SIZE_H - 400);
+                      let safeX, safeY;
+                      let attempts = 0;
+                      // Keep generating coordinates until we find one NOT in a wall (max 50 tries)
+                      do {
+                          safeX = 200 + Math.random() * (MAP_SIZE_W - 400);
+                          safeY = 200 + Math.random() * (MAP_SIZE_H - 400);
+                          attempts++;
+                      } while (checkWallCollision(safeX, safeY, 15) && attempts < 50);
+                      
+                      p.x = safeX;
+                      p.y = safeY;
                   }
               });
               io.emit('system_message', 'ANOMALY: SPATIAL SHIFT DETECTED');
@@ -655,15 +660,16 @@ io.on('connection', (socket) => {
           else if (cardId === 'task_shuffle') {
               const crewIds = Object.keys(players).filter(id => players[id].role === 'Crewmate' && !players[id].isDead && !players[id].isEscaped);
               crewIds.forEach(id => {
-                  // Tell client to clear their current task array
                   io.to(id).emit('wipe_tasks'); 
                   
-                  // Issue brand new tasks based on how many they had left
-                  for(let i = 0; i < players[id].tasksLeft; i++) {
-                      const baseTask = GAME_TASKS[Math.floor(Math.random() * GAME_TASKS.length)];
+                  // Shuffle the main list, then slice what they need
+                  let shuffledTasks = [...GAME_TASKS].sort(() => 0.5 - Math.random());
+                  let assignedTasks = shuffledTasks.slice(0, players[id].tasksLeft);
+
+                  assignedTasks.forEach(baseTask => {
                       const taskInstance = { ...baseTask, id: 'task_' + Math.floor(Math.random()*100000) };
                       io.to(id).emit('add_new_task', taskInstance);
-                  }
+                  });
               });
               io.emit('system_message', 'WARNING: TASK MANIFEST CORRUPTED');
           }
