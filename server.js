@@ -10,10 +10,13 @@ app.get("/health", (req, res) => { res.status(200).json({ status: "ok", message:
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  path: "/api/game-data", cors: { origin: "*", methods: ["GET", "POST"] },
-  pingInterval: 10000, pingTimeout: 5000, 
+  path: "/v1/sys/fetch", // Must match the client
+  cors: { origin: "*", methods: ["GET", "POST"] },
+  transports: ['polling'], // Force the server to only use polling
+  pingInterval: 30000,    // Slowed way down (30 seconds) to reduce "heartbeat" noise
+  pingTimeout: 15000,
+  allowUpgrades: false    // Security measure to keep it on standard HTTP
 });
-
 const players = {};
 let mapBodies = []; 
 let countdownInterval = null;
