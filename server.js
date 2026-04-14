@@ -13,7 +13,7 @@ const io = new Server(server, {
   path: "/v1/sys/fetch", // Must match the client
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['polling'], // Force the server to only use polling
-  pingInterval: 3000,    // Slowed way down (30 seconds) to reduce "heartbeat" noise
+  pingInterval: 7500,    // Slowed way down (30 seconds) to reduce "heartbeat" noise
   pingTimeout: 15000,
   allowUpgrades: false    // Security measure to keep it on standard HTTP
 });
